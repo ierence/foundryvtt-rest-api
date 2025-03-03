@@ -1,0 +1,20 @@
+<section class="communication-header">
+  <h1>{{localize 'foundryvtt-get-actors-external.communication-panel'}}</h1>
+</section>
+
+<section class="message-container">
+  {{#each messages}}
+    <div class="message">
+      <span class="sender">{{this.sender}}:</span>
+      <span class="content">{{this.content}}</span>
+      <span class="timestamp">{{formatDate this.timestamp}}</span>
+    </div>
+  {{/each}}
+</section>
+
+<section class="message-input-container">
+  <input type="text" id="message-input" placeholder="{{localize 'foundryvtt-get-actors-external.message-placeholder'}}" />
+  <button class="module-control" type="button" data-action="send-message">
+    <i class="fas fa-paper-plane"></i>
+  </button>
+</section>

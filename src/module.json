@@ -1,0 +1,23 @@
+{
+  "id": "foundry-get-actors-external",
+  "title": "Foundry Get Actors External",
+  "description": "Adds endpoint to get actor data from FoundryVTT",
+  "version": "0.0.1",
+  "packs": [],
+  "relationships": [],
+  "scripts": [],
+  "compatibility": {
+    "minimum": "12",
+    "verified": "12",
+    "maximum": "12"
+  },
+  "languages": [
+    {
+      "lang": "en",
+      "name": "English",
+      "path": "languages/en.json"
+    }
+  ],
+  "styles": ["style.css"],
+  "esmodules": ["scripts/module.js"]
+}

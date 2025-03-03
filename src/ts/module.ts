@@ -5,6 +5,8 @@ import { FoundryGetActorsExternal } from "./types";
 import { exportScene } from "../utils/export";
 import { importScene } from "../utils/import";
 import { WebSocketManager } from "./network/webSocketManager";
+import { exportActors } from "../utils/actorExport";
+import { ActorExportForm } from "./apps/actorExportForm"; // Add this import
 
 let module: FoundryGetActorsExternal;
 
@@ -44,6 +46,49 @@ Hooks.once("init", () => {
       }
     }
   });
+
+  // Register module settings
+  (game as Game).settings.register(moduleId, "actorFolderUuid", {
+    name: "Actor Folder UUID",
+    hint: "UUID of the folder from which to retrieve actors for export",
+    scope: "world",
+    config: true,
+    type: String,
+    default: ""
+  });
+
+  (game as Game).settings.register(moduleId, "exportPath", {
+    name: "Disk Folder Path",
+    hint: "Path where actor data will be exported",
+    scope: "world",
+    config: true,
+    type: String,
+    default: `data/external/${(game as Game).world.id}/actors`
+  });
+
+  (game as Game).settings.register(moduleId, "backupLimit", {
+    name: "Backup Limit",
+    hint: "Number of backup folders to keep (0 = keep all)",
+    scope: "world",
+    config: true,
+    type: Number,
+    default: 0
+  });
+
+  // Add export button
+  (game as Game).settings.registerMenu(moduleId, "exportActors", {
+    name: "Export Actors",
+    label: "Export Actors to Disk",
+    hint: "Export all actors from the specified folder to disk",
+    icon: "fas fa-file-export",
+    type: ActorExportForm,
+    restricted: true
+  });
+  // Create and expose module API
+  module.api = {
+    exportActors,
+    getWebSocketManager: () => module.socketManager
+  };
 });
 
 Hooks.once("ready", () => {

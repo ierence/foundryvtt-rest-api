@@ -21,13 +21,6 @@ export async function exportActors() {
   }
   
   const timestamp = new Date().toISOString().replace(/[:.]/g, "_");
-  const basePath = (game as Game).settings.get(moduleId, "exportPath") as string;
-  const exportPath = `${basePath}/${timestamp}`;
-  
-  // Create directories
-  await createDirectoryRecursive(exportPath);
-  
-  // Get all actors recursively
   const actors = await getActorsRecursive(folder);
   
   if (actors.length === 0) {
@@ -35,38 +28,55 @@ export async function exportActors() {
     return null;
   }
   
-  // Export each actor
-  const actorIndex = [];
-  for (const actor of actors) {
-    // Cast to our extended type
-    const typedActor = actor as FoundryActorWithSystem;
-    const actorData = typedActor.toObject();
-    const filename = `${typedActor.id}.json`;
-    
-    // Write actor data to file
-    await saveToFile(exportPath, filename, actorData);
-    
-    // Add to index
-    actorIndex.push({
-      id: typedActor.id,
-      name: typedActor.name,
-      type: typedActor.type,
-      img: typedActor.img,
-      system: typedActor.system?.type || typedActor.type,
-      filename
-    });
+  // Get the module instance
+  const moduleInstance = game.modules.get(moduleId);
+  
+  // Check if WebSocket is connected
+  if (!moduleInstance?.socketManager?.isConnected?.()) {
+    console.error(`${moduleId} | WebSocket manager not connected!`);
+    ui.notifications?.error("WebSocket connection not available");
+    return null;
   }
   
-  // Save index file
-  await saveToFile(exportPath, "index.json", actorIndex);
-  
-  // Clean up old backups if needed
-  await cleanupOldBackups(basePath);
-  
-  // Update "latest" symbolic link or file
-  await updateLatestPointer(basePath, timestamp);
-  
-  return exportPath;
+  // Send each actor via WebSocket
+  try {
+    let successCount = 0;
+    for (const actor of actors) {
+      const actorData = actor.toObject();
+      const success = moduleInstance.socketManager.send({
+        type: "actor-data",
+        worldId: game.world.id,
+        actorId: actor.id,
+        data: actorData,
+        backup: timestamp
+      });
+      
+      if (success) successCount++;
+    }
+    
+    // Also send a "latest" version
+    let latestSuccessCount = 0;
+    for (const actor of actors) {
+      const actorData = actor.toObject();
+      const success = moduleInstance.socketManager.send({
+        type: "actor-data",
+        worldId: game.world.id,
+        actorId: actor.id,
+        data: actorData,
+        backup: "latest"
+      });
+      
+      if (success) latestSuccessCount++;
+    }
+    
+    console.log(`${moduleId} | Export completed: ${successCount}/${actors.length} actors exported to ${timestamp}, ${latestSuccessCount}/${actors.length} to latest`);
+    ui.notifications?.info(`${successCount} actors exported via WebSocket with backup: ${timestamp}`);
+    return timestamp;
+  } catch (error) {
+    console.error(`${moduleId} | Error exporting actors:`, error);
+    ui.notifications?.error("Error exporting actors. See console for details.");
+    return null;
+  }
 }
 
 /**

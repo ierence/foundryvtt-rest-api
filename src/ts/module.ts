@@ -102,30 +102,44 @@ function initializeWebSocket() {
   const wsRelayUrl = (game as Game).settings.get(moduleId, "wsRelayUrl") as string;
   const wsRelayToken = (game as Game).settings.get(moduleId, "wsRelayToken") as string;
   
+  if (!wsRelayUrl) {
+    console.error(`${moduleId} | WebSocket relay URL is empty. Please configure it in module settings.`);
+    return;
+  }
+  
   console.log(`${moduleId} | Initializing WebSocket with URL: ${wsRelayUrl}, token: ${wsRelayToken}`);
   
-  // Create and connect the WebSocket manager
-  module.socketManager = new WebSocketManager(wsRelayUrl, wsRelayToken);
-  module.socketManager.connect();
-  
-  // Example of handling "pong" types
-  module.socketManager.onMessageType("pong", () => {
-    console.log(`${moduleId} | Received pong from server`);
-  });
-  
-  // Handle incoming messages
-  module.socketManager.onMessageType("message", (data) => {
-    console.log(`${moduleId} | Received message:`, data);
+  try {
+    // Create and connect the WebSocket manager
+    module.socketManager = new WebSocketManager(wsRelayUrl, wsRelayToken);
+    module.socketManager.connect();
     
-    // Add message to the communication panel
-    if (data.content && data.sender !== (game as Game).user?.name) {
-      module.communicationPanel.addMessage({
-        content: data.content,
-        sender: "Web App",
-        timestamp: data.timestamp || Date.now()
-      });
-    }
-  });
+    // Example of handling "pong" types
+    module.socketManager.onMessageType("pong", () => {
+      console.log(`${moduleId} | Received pong from server`);
+    });
+    
+    // Handle incoming messages
+    module.socketManager.onMessageType("message", (data) => {
+      console.log(`${moduleId} | Received message:`, data);
+      
+      // Add message to the communication panel
+      if (data.content && data.sender !== (game as Game).user?.name) {
+        module.communicationPanel.addMessage({
+          content: data.content,
+          sender: "Web App",
+          timestamp: data.timestamp || Date.now()
+        });
+      }
+    });
+    
+    // Handle actor-data-ack messages
+    module.socketManager.onMessageType("actor-data-ack", (data) => {
+      console.log(`${moduleId} | Actor data acknowledgment:`, data);
+    });
+  } catch (error) {
+    console.error(`${moduleId} | Error initializing WebSocket:`, error);
+  }
 }
 
 // Add button to the sidebar

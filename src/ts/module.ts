@@ -838,26 +838,104 @@ function initializeWebSocket() {
               css += style.textContent + '\n';
             });
             
-            // 3. Get specific stylesheet links with the actor's type
-            const linkSheets = document.querySelectorAll(`link[rel="stylesheet"][href*="${actor.type}"]`);
-            const cssPromises = Array.from(linkSheets).map(async (link) => {
+            // 3. Extract all classes and IDs from the HTML to capture all relevant styles
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = html;
+            
+            // Create sets to avoid duplicates
+            const classNames = new Set<string>();
+            const ids = new Set<string>();
+            
+            // Function to extract classes and IDs from an element and its children
+            function extractClassesAndIds(element: Element) {
+              // Get classes
+              if (element.classList && element.classList.length) {
+                element.classList.forEach(className => classNames.add(className));
+              }
+              
+              // Get ID
+              if (element.id) {
+                ids.add(element.id);
+              }
+              
+              // Process children recursively
+              for (let i = 0; i < element.children.length; i++) {
+                extractClassesAndIds(element.children[i]);
+              }
+            }
+            
+            // Extract classes and IDs from all elements
+            extractClassesAndIds(tempDiv);
+            
+            // Convert sets to arrays
+            const uniqueClassNames = Array.from(classNames);
+            const uniqueIds = Array.from(ids);
+            
+            ModuleLogger.debug(`${moduleId} | Extracted ${uniqueClassNames.length} unique classes and ${uniqueIds.length} unique IDs`);
+            
+            // Create a mapping of elements to their styles for debugging
+            const styleMap: Record<string, string[]> = {};
+            
+            // 4. Collect all stylesheets in the document
+            const allStyles = document.querySelectorAll('style');
+            const allLinks = document.querySelectorAll('link[rel="stylesheet"]');
+            
+            // Process inline styles
+            allStyles.forEach(style => {
+              // Skip if we already added this style sheet (avoid duplicates)
+              if (style.dataset.appid && style.dataset.appid === sheetAppId) {
+                return; // Already added above
+              }
+              
+              const styleContent = style.textContent || '';
+              
+              // Check if this style contains any of our classes or IDs
+              const isRelevant = uniqueClassNames.some(className => 
+                styleContent.includes(`.${className}`)) || 
+                uniqueIds.some(id => styleContent.includes(`#${id}`)) ||
+                // Common selectors that might apply
+                styleContent.includes('.window-app') || 
+                styleContent.includes('.sheet') || 
+                styleContent.includes('.actor-sheet') ||
+                styleContent.includes(`.${actor.type}-sheet`);
+              
+              if (isRelevant) {
+                ModuleLogger.debug(`${moduleId} | Adding relevant inline style`);
+                css += styleContent + '\n';
+              }
+            });
+            
+            // 5. Process external stylesheets
+            const stylesheetPromises = Array.from(allLinks).map(async (link) => {
               try {
                 const href = link.getAttribute('href');
                 if (!href) return '';
                 
-                ModuleLogger.debug(`${moduleId} | Fetching external CSS from: ${href}`);
-                const response = await fetch(href);
-                if (!response.ok) return '';
+                // Skip foundry-specific stylesheets that we'll handle separately
+                if (href.includes('fonts.googleapis.com')) return '';
                 
-                return await response.text();
+                ModuleLogger.debug(`${moduleId} | Fetching external CSS from: ${href}`);
+                const fullUrl = href.startsWith('http') ? href : 
+                              href.startsWith('/') ? `${window.location.origin}${href}` : 
+                              `${window.location.origin}/${href}`;
+                
+                const response = await fetch(fullUrl);
+                if (!response.ok) {
+                  ModuleLogger.warn(`${moduleId} | Failed to fetch CSS: ${fullUrl}, status: ${response.status}`);
+                  return '';
+                }
+                
+                const styleContent = await response.text();
+                return styleContent;
               } catch (e) {
                 ModuleLogger.warn(`${moduleId} | Failed to fetch external CSS: ${e}`);
                 return '';
               }
             });
             
-            // 4. Also grab foundry core styles that are needed
+            // 6. Important: Add foundry core styles
             const coreStylesheets = [
+              `${window.location.origin}/css/style.css`,  // Try alternative path
               `${window.location.origin}/styles/foundry.css`,
               `${window.location.origin}/ui/sheets.css`,
               `${window.location.origin}/systems/${(game as Game).system.id}/styles/system.css`
@@ -880,22 +958,47 @@ function initializeWebSocket() {
             });
             
             // Wait for all external CSS to be fetched
-            const allPromises = [...cssPromises, ...corePromises];
+            const allPromises = [...stylesheetPromises, ...corePromises];
             const externalStyles = await Promise.all(allPromises);
             externalStyles.forEach(style => {
               css += style + '\n';
             });
             
-            // 5. Collect styles from any active modules that might be enhancing the sheet
-            const moduleStyles = document.querySelectorAll('style.module-styles');
-            moduleStyles.forEach(style => {
-              // Only include module styles that target actor sheets
-              const content = style.textContent || '';
-              if (content.includes('.sheet') || content.includes('.actor-sheet') || 
-                  content.includes(`.${actor.type}-sheet`)) {
-                css += content + '\n';
-              }
-            });
+            // 7. Add fallback styles if needed
+            if (css.length < 100) {
+              ModuleLogger.warn(`${moduleId} | CSS fetch failed or returned minimal content. Adding fallback styles.`);
+              css += `
+    /* Fallback styles for actor sheet */
+    .window-app {
+      font-family: "Signika", sans-serif;
+      background: #f0f0e0;
+      border-radius: 5px;
+      box-shadow: 0 0 20px #000;
+      color: #191813;
+    }
+    .window-content {
+      background: rgba(255, 255, 240, 0.9);
+      padding: 8px;
+      overflow-y: auto;
+      background: url(${window.location.origin}/ui/parchment.jpg) repeat;
+    }
+    input, select, textarea {
+      border: 1px solid #7a7971;
+      background: rgba(255, 255, 255, 0.8);
+    }
+    button {
+      background: rgba(0, 0, 0, 0.1);
+      border: 1px solid #7a7971;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    .profile-img {
+      border: none;
+      max-width: 100%;
+      max-height: 220px;
+    }
+    `;
+            }
             
             // Log the CSS collection results
             ModuleLogger.debug(`${moduleId} | Collected CSS: ${css.length} bytes`);

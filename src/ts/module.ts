@@ -1,6 +1,6 @@
 // src/ts/module.ts
 import "../styles/style.scss";
-import { FoundryGetActorsExternal } from "./types";
+import { FoundryRestApi } from "./types";
 import { moduleId } from "./constants";
 import { WebSocketManager } from "./network/webSocketManager";
 
@@ -29,7 +29,7 @@ Hooks.once("init", () => {
     type: String,
     default: "ws://localhost:3010",
     onChange: () => {
-      const module = (game as Game).modules.get(moduleId) as FoundryGetActorsExternal;
+      const module = (game as Game).modules.get(moduleId) as FoundryRestApi;
       if (module.socketManager) {
         module.socketManager.disconnect();
         initializeWebSocket();
@@ -45,7 +45,7 @@ Hooks.once("init", () => {
     type: String,
     default: (game as Game).world.id,
     onChange: () => {
-      const module = (game as Game).modules.get(moduleId) as FoundryGetActorsExternal;
+      const module = (game as Game).modules.get(moduleId) as FoundryRestApi;
       if (module.socketManager) {
         module.socketManager.disconnect();
         initializeWebSocket();
@@ -54,7 +54,7 @@ Hooks.once("init", () => {
   });
 
   // Create and expose module API
-  const module = (game as Game).modules.get(moduleId) as FoundryGetActorsExternal;
+  const module = (game as Game).modules.get(moduleId) as FoundryRestApi;
   module.api = {
     getWebSocketManager: () => module.socketManager,
     search: async (query: string, filter?: string) => {
@@ -101,7 +101,7 @@ function initializeWebSocket() {
   // Get settings
   const wsRelayUrl = (game as Game).settings.get(moduleId, "wsRelayUrl") as string;
   const wsRelayToken = (game as Game).settings.get(moduleId, "wsRelayToken") as string;
-  const module = (game as Game).modules.get(moduleId) as FoundryGetActorsExternal;
+  const module = (game as Game).modules.get(moduleId) as FoundryRestApi;
   
   if (!wsRelayUrl) {
     console.error(`${moduleId} | WebSocket relay URL is empty. Please configure it in module settings.`);

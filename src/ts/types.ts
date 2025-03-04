@@ -12,24 +12,15 @@ export enum WSCloseCodes {
 }
 
 // Module-specific interfaces
-export interface FoundryGetActorsExternal extends Game.ModuleData<any> {
+export interface FoundryRestApi extends Game.ModuleData<any> {
   socketManager: WebSocketManager;
-  api: FoundryGetActorsExternalAPI;
+  api: FoundryRestApiAPI;
 }
 
-export interface FoundryGetActorsExternalAPI {
+export interface FoundryRestApiAPI {
   getWebSocketManager: () => WebSocketManager;
   search: (query: string, filter?: string) => Promise<any[]>;  // Add this line
   getByUuid: (uuid: string) => Promise<any>;  // Add this line
-}
-
-export interface ActorIndexEntry {
-  id: string;
-  name: string;
-  type: string;
-  img: string;
-  system?: string;
-  filename: string;
 }
 
 export interface WebSocketMessage {
@@ -48,27 +39,6 @@ export interface ChatMessage {
 export interface BackupFolder {
   path: string;
   name: string;
-}
-
-export interface ActorWebSocketResponse {
-  success: boolean;
-  data?: any;
-  error?: string;
-}
-
-export interface ActorExportOptions {
-  folderUuid: string;
-  exportPath: string;
-  backupLimit: number;
-}
-
-// Function type signatures
-export declare namespace ActorExport {
-  export type GetActorsRecursive = (folder: string) => Promise<any>;
-  export type CreateDirectoryRecursive = (dirPath: string) => Promise<void>;
-  export type SaveToFile = (dirPath: string, filename: string, data: any) => Promise<void>;
-  export type CleanupOldBackups = (basePath: string) => Promise<void>;
-  export type UpdateLatestPointer = (basePath: string, timestamp: string) => Promise<void>;
 }
 
 // Server route types

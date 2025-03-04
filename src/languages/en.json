@@ -1,5 +1,5 @@
 {
-  "foundryvtt-get-actors-external.communication-panel": "Communication Panel",
-  "foundryvtt-get-actors-external.message-placeholder": "Hello from Foundry VTT!",
-  "foundryvtt-get-actors-external.send": "Send"
+  "foundryvtt-rest-api.communication-panel": "Communication Panel",
+  "foundryvtt-rest-api.message-placeholder": "Hello from Foundry VTT!",
+  "foundryvtt-rest-api.send": "Send"
 }

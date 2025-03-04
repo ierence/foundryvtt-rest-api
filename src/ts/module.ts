@@ -779,18 +779,18 @@ function initializeWebSocket() {
     });
 
     // Handle actor sheet HTML request
-    module.socketManager.onMessageType("get-actor-sheet-html", async (data) => {
-      ModuleLogger.info(`${moduleId} | Received actor sheet HTML request for UUID: ${data.uuid}`);
+    module.socketManager.onMessageType("get-sheet-html", async (data) => {
+      ModuleLogger.info(`${moduleId} | Received sheet HTML request for UUID: ${data.uuid}`);
       
       try {
         // Get the actor from its UUID
         const actor = await fromUuid(data.uuid) as Actor;
         if (!actor) {
-          ModuleLogger.error(`${moduleId} | Actor not found for UUID: ${data.uuid}`);
+          ModuleLogger.error(`${moduleId} | Entity not found for UUID: ${data.uuid}`);
           module.socketManager.send({
             type: "actor-sheet-html-response",
             requestId: data.requestId,
-            data: { error: "Actor not found", uuid: data.uuid }
+            data: { error: "Entity not found", uuid: data.uuid }
           });
           return;
         }
@@ -811,11 +811,13 @@ function initializeWebSocket() {
             // Get the associated CSS - much more comprehensive approach
             let css = '';
             
+            // Get the sheet's appId for later comparisons
+            const sheetAppId = String(sheet.appId);
+            
             // 1. Get CSS from style elements with data-appid matching the sheet
             const appStyles = document.querySelectorAll('style[data-appid]');
             appStyles.forEach(style => {
               const styleAppId = (style as HTMLElement).dataset.appid;
-              const sheetAppId = String(sheet.appId);
               if (styleAppId === sheetAppId) {
                 css += style.textContent + '\n';
               }
@@ -954,8 +956,10 @@ function initializeWebSocket() {
             // Extract potential stylesheet paths from existing links
             const existingCSSPaths = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
               .map(link => link.getAttribute('href'))
-              .filter(Boolean)
-              .filter(href => !href.includes('fonts.googleapis.com') && !href.includes('//'));
+              .filter((href): href is string => 
+                href !== null && 
+                !href.includes('fonts.googleapis.com') && 
+                !href.includes('//'));
             
             // Add these paths to our core stylesheets
             coreStylesheets.push(...existingCSSPaths);

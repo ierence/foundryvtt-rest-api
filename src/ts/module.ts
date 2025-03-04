@@ -3,6 +3,7 @@ import "../styles/style.scss";
 import { FoundryRestApi } from "./types";
 import { moduleId } from "./constants";
 import { WebSocketManager } from "./network/webSocketManager";
+import { ModuleLogger } from "./utils/logger";
 
 // Declare QuickInsert interface
 declare global {
@@ -53,23 +54,38 @@ Hooks.once("init", () => {
     }
   });
 
+  (game as Game).settings.register(moduleId, "logLevel", {
+    name: "Log Level",
+    hint: "Set the level of detail for module logging",
+    scope: "world",
+    config: true,
+    type: Number,
+    choices: {
+      0: "debug",
+      1: "info",
+      2: "warn",
+      3: "error"
+    } as any,
+    default: 2
+  });
+
   // Create and expose module API
   const module = (game as Game).modules.get(moduleId) as FoundryRestApi;
   module.api = {
     getWebSocketManager: () => module.socketManager,
     search: async (query: string, filter?: string) => {
       if (!window.QuickInsert) {
-        console.error(`${moduleId} | QuickInsert not available`);
+        ModuleLogger.error(`${moduleId} | QuickInsert not available`);
         return [];
       }
       
       if (!window.QuickInsert.hasIndex) {
-        console.log(`${moduleId} | QuickInsert index not ready, forcing index creation`);
+        ModuleLogger.info(`${moduleId} | QuickInsert index not ready, forcing index creation`);
         try {
           window.QuickInsert.forceIndex();
           await new Promise(resolve => setTimeout(resolve, 500));
         } catch (error) {
-          console.error(`${moduleId} | Failed to force QuickInsert index:`, error);
+          ModuleLogger.error(`${moduleId} | Failed to force QuickInsert index:`, error);
         }
       }
       
@@ -84,7 +100,7 @@ Hooks.once("init", () => {
       try {
         return await fromUuid(uuid);
       } catch (error) {
-        console.error(`${moduleId} | Error getting entity by UUID:`, error);
+        ModuleLogger.error(`${moduleId} | Error getting entity by UUID:`, error);
         return null;
       }
     }
@@ -104,11 +120,11 @@ function initializeWebSocket() {
   const module = (game as Game).modules.get(moduleId) as FoundryRestApi;
   
   if (!wsRelayUrl) {
-    console.error(`${moduleId} | WebSocket relay URL is empty. Please configure it in module settings.`);
+    ModuleLogger.error(`${moduleId} | WebSocket relay URL is empty. Please configure it in module settings.`);
     return;
   }
   
-  console.log(`${moduleId} | Initializing WebSocket with URL: ${wsRelayUrl}, token: ${wsRelayToken}`);
+  ModuleLogger.info(`${moduleId} | Initializing WebSocket with URL: ${wsRelayUrl}, token: ${wsRelayToken}`);
   
   try {
     // Create and connect the WebSocket manager
@@ -117,21 +133,21 @@ function initializeWebSocket() {
     
     // Register message handlers
     module.socketManager.onMessageType("ping", () => {
-      console.log(`${moduleId} | Received ping, sending pong`);
+      ModuleLogger.info(`${moduleId} | Received ping, sending pong`);
       module.socketManager.send({ type: "pong" });
     });
 
     module.socketManager.onMessageType("pong", () => {
-      console.log(`${moduleId} | Received pong`);
+      ModuleLogger.info(`${moduleId} | Received pong`);
     });
     
     // Handle search requests
     module.socketManager.onMessageType("perform-search", async (data) => {
-      console.log(`${moduleId} | Received search request:`, data);
+      ModuleLogger.info(`${moduleId} | Received search request:`, data);
       
       try {
         if (!window.QuickInsert) {
-          console.error(`${moduleId} | QuickInsert not available`);
+          ModuleLogger.error(`${moduleId} | QuickInsert not available`);
           module.socketManager.send({
             type: "search-results",
             requestId: data.requestId,
@@ -143,12 +159,12 @@ function initializeWebSocket() {
         }
         
         if (!window.QuickInsert.hasIndex) {
-          console.log(`${moduleId} | QuickInsert index not ready, forcing index creation`);
+          ModuleLogger.info(`${moduleId} | QuickInsert index not ready, forcing index creation`);
           try {
             window.QuickInsert.forceIndex();
             await new Promise(resolve => setTimeout(resolve, 500));
           } catch (error) {
-            console.error(`${moduleId} | Failed to force QuickInsert index:`, error);
+            ModuleLogger.error(`${moduleId} | Failed to force QuickInsert index:`, error);
             module.socketManager.send({
               type: "search-results",
               requestId: data.requestId,
@@ -161,11 +177,11 @@ function initializeWebSocket() {
         }
         
         const allResults = await window.QuickInsert.search(data.query, null, 200);
-        console.log(`${moduleId} | Initial search returned ${allResults.length} results`);
+        ModuleLogger.info(`${moduleId} | Initial search returned ${allResults.length} results`);
         
         let filteredResults = allResults;
         if (data.filter) {
-          console.log(`${moduleId} | Applying filters:`, data.filter);
+          ModuleLogger.info(`${moduleId} | Applying filters:`, data.filter);
           const filters = typeof data.filter === 'string' ? 
             parseFilterString(data.filter) : data.filter;
             
@@ -200,7 +216,7 @@ function initializeWebSocket() {
           })
         });
       } catch (error) {
-        console.error(`${moduleId} | Error performing search:`, error);
+        ModuleLogger.error(`${moduleId} | Error performing search:`, error);
         module.socketManager.send({
           type: "search-results",
           requestId: data.requestId,
@@ -213,13 +229,13 @@ function initializeWebSocket() {
     
     // Handle entity requests
     module.socketManager.onMessageType("get-entity", async (data) => {
-      console.log(`${moduleId} | Received entity request:`, data);
+      ModuleLogger.info(`${moduleId} | Received entity request:`, data);
       
       try {
         const entity = await fromUuid(data.uuid);
         
         if (!entity) {
-          console.error(`${moduleId} | Entity not found for UUID: ${data.uuid}`);
+          ModuleLogger.error(`${moduleId} | Entity not found for UUID: ${data.uuid}`);
           module.socketManager.send({
             type: "entity-data",
             requestId: data.requestId,
@@ -231,7 +247,7 @@ function initializeWebSocket() {
         }
         
         const entityData = entity.toObject ? entity.toObject() : entity;
-        console.log(`${moduleId} | Sending entity data for: ${data.uuid}`, entityData);
+        ModuleLogger.info(`${moduleId} | Sending entity data for: ${data.uuid}`, entityData);
         
         module.socketManager.send({
           type: "entity-data",
@@ -240,7 +256,7 @@ function initializeWebSocket() {
           data: entityData
         });
       } catch (error) {
-        console.error(`${moduleId} | Error getting entity:`, error);
+        ModuleLogger.error(`${moduleId} | Error getting entity:`, error);
         module.socketManager.send({
           type: "entity-data",
           requestId: data.requestId,
@@ -253,7 +269,7 @@ function initializeWebSocket() {
 
     // Handle structure request
     module.socketManager.onMessageType("get-structure", async (data) => {
-      console.log(`${moduleId} | Received structure request`);
+      ModuleLogger.info(`${moduleId} | Received structure request`);
       
       try {
         // Get all folders
@@ -289,7 +305,7 @@ function initializeWebSocket() {
           compendiums
         });
       } catch (error) {
-        console.error(`${moduleId} | Error getting structure:`, error);
+        ModuleLogger.error(`${moduleId} | Error getting structure:`, error);
         module.socketManager.send({
           type: "structure-data",
           requestId: data.requestId,
@@ -302,7 +318,7 @@ function initializeWebSocket() {
     
     // Handle contents request
     module.socketManager.onMessageType("get-contents", async (data) => {
-      console.log(`${moduleId} | Received contents request for path: ${data.path}`);
+      ModuleLogger.info(`${moduleId} | Received contents request for path: ${data.path}`);
       
       try {
         let contents = [];
@@ -361,7 +377,7 @@ function initializeWebSocket() {
           entities: contents
         });
       } catch (error) {
-        console.error(`${moduleId} | Error getting contents:`, error);
+        ModuleLogger.error(`${moduleId} | Error getting contents:`, error);
         module.socketManager.send({
           type: "contents-data",
           requestId: data.requestId,
@@ -374,7 +390,7 @@ function initializeWebSocket() {
     
     // Handle entity creation
     module.socketManager.onMessageType("create-entity", async (data) => {
-      console.log(`${moduleId} | Received create entity request for type: ${data.entityType}`);
+      ModuleLogger.info(`${moduleId} | Received create entity request for type: ${data.entityType}`);
       
       try {
         // Get the document class for the entity type
@@ -403,7 +419,7 @@ function initializeWebSocket() {
           entity: entity.toObject()
         });
       } catch (error) {
-        console.error(`${moduleId} | Error creating entity:`, error);
+        ModuleLogger.error(`${moduleId} | Error creating entity:`, error);
         module.socketManager.send({
           type: "entity-created",
           requestId: data.requestId,
@@ -415,7 +431,7 @@ function initializeWebSocket() {
     
     // Handle entity update
     module.socketManager.onMessageType("update-entity", async (data) => {
-      console.log(`${moduleId} | Received update entity request for UUID: ${data.uuid}`);
+      ModuleLogger.info(`${moduleId} | Received update entity request for UUID: ${data.uuid}`);
       
       try {
         // Get the entity by UUID
@@ -438,7 +454,7 @@ function initializeWebSocket() {
           entity: updatedEntity?.toObject()
         });
       } catch (error) {
-        console.error(`${moduleId} | Error updating entity:`, error);
+        ModuleLogger.error(`${moduleId} | Error updating entity:`, error);
         module.socketManager.send({
           type: "entity-updated",
           requestId: data.requestId,
@@ -451,7 +467,7 @@ function initializeWebSocket() {
     
     // Handle entity deletion
     module.socketManager.onMessageType("delete-entity", async (data) => {
-      console.log(`${moduleId} | Received delete entity request for UUID: ${data.uuid}`);
+      ModuleLogger.info(`${moduleId} | Received delete entity request for UUID: ${data.uuid}`);
       
       try {
         // Get the entity by UUID
@@ -471,7 +487,7 @@ function initializeWebSocket() {
           success: true
         });
       } catch (error) {
-        console.error(`${moduleId} | Error deleting entity:`, error);
+        ModuleLogger.error(`${moduleId} | Error deleting entity:`, error);
         module.socketManager.send({
           type: "entity-deleted",
           requestId: data.requestId,
@@ -482,7 +498,7 @@ function initializeWebSocket() {
       }
     });
   } catch (error) {
-    console.error(`${moduleId} | Error initializing WebSocket:`, error);
+    ModuleLogger.error(`${moduleId} | Error initializing WebSocket:`, error);
   }
 }
 

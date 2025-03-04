@@ -59,7 +59,6 @@ jobs:
         run: yarn build
 
       - name: Create zip archive
-        working-directory: foundryvtt-rest-api
         run: zip -r ./module.zip module.json scripts/ templates/ languages/
 
       - name: Create GitHub Release

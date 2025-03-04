@@ -795,17 +795,6 @@ function initializeWebSocket() {
           return;
         }
         
-        // Check if it's an actor
-        if (actor.documentName !== "Actor") {
-          ModuleLogger.error(`${moduleId} | Entity is not an Actor: ${data.uuid}`);
-          module.socketManager.send({
-            type: "actor-sheet-html-response",
-            requestId: data.requestId,
-            data: { error: "Entity is not an Actor", uuid: data.uuid }
-          });
-          return;
-        }
-        
         // Create a temporary sheet to render
         const sheet = actor.sheet?.render(true) as ActorSheet;
         

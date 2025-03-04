@@ -817,17 +817,103 @@ function initializeWebSocket() {
               throw new Error("Failed to render actor sheet");
             }
             
-            const html = sheet.element[0].outerHTML;
+            let html = sheet.element[0].outerHTML;
             
-            // Get the associated CSS
-            const appStyles = document.querySelectorAll('style[data-appid]');
+            // Get the associated CSS - much more comprehensive approach
             let css = '';
+            
+            // 1. Get CSS from style elements with data-appid matching the sheet
+            const appStyles = document.querySelectorAll('style[data-appid]');
             appStyles.forEach(style => {
-              if (Number((style as HTMLElement).dataset.appid) === sheet.appId) {
-                css += style.textContent;
+              const styleAppId = (style as HTMLElement).dataset.appid;
+              const sheetAppId = String(sheet.appId);
+              if (styleAppId === sheetAppId) {
+                css += style.textContent + '\n';
               }
             });
             
+            // 2. Get global system styles that might apply to this sheet
+            const systemStyles = document.querySelectorAll(`style[id^="system-${actor.type}"]`);
+            systemStyles.forEach(style => {
+              css += style.textContent + '\n';
+            });
+            
+            // 3. Get specific stylesheet links with the actor's type
+            const linkSheets = document.querySelectorAll(`link[rel="stylesheet"][href*="${actor.type}"]`);
+            const cssPromises = Array.from(linkSheets).map(async (link) => {
+              try {
+                const href = link.getAttribute('href');
+                if (!href) return '';
+                
+                ModuleLogger.debug(`${moduleId} | Fetching external CSS from: ${href}`);
+                const response = await fetch(href);
+                if (!response.ok) return '';
+                
+                return await response.text();
+              } catch (e) {
+                ModuleLogger.warn(`${moduleId} | Failed to fetch external CSS: ${e}`);
+                return '';
+              }
+            });
+            
+            // 4. Also grab foundry core styles that are needed
+            const coreStylesheets = [
+              `${window.location.origin}/styles/foundry.css`,
+              `${window.location.origin}/ui/sheets.css`,
+              `${window.location.origin}/systems/${(game as Game).system.id}/styles/system.css`
+            ];
+            
+            const corePromises = coreStylesheets.map(async (path) => {
+              try {
+                ModuleLogger.debug(`${moduleId} | Fetching core CSS from: ${path}`);
+                const response = await fetch(path);
+                if (!response.ok) {
+                  ModuleLogger.warn(`${moduleId} | Failed to fetch CSS: ${path}, status: ${response.status}`);
+                  return '';
+                }
+                
+                return await response.text();
+              } catch (e) {
+                ModuleLogger.warn(`${moduleId} | Failed to fetch core CSS: ${e}`);
+                return '';
+              }
+            });
+            
+            // Wait for all external CSS to be fetched
+            const allPromises = [...cssPromises, ...corePromises];
+            const externalStyles = await Promise.all(allPromises);
+            externalStyles.forEach(style => {
+              css += style + '\n';
+            });
+            
+            // 5. Collect styles from any active modules that might be enhancing the sheet
+            const moduleStyles = document.querySelectorAll('style.module-styles');
+            moduleStyles.forEach(style => {
+              // Only include module styles that target actor sheets
+              const content = style.textContent || '';
+              if (content.includes('.sheet') || content.includes('.actor-sheet') || 
+                  content.includes(`.${actor.type}-sheet`)) {
+                css += content + '\n';
+              }
+            });
+            
+            // Log the CSS collection results
+            ModuleLogger.debug(`${moduleId} | Collected CSS: ${css.length} bytes`);
+            
+            // Before sending the HTML, fix asset URLs
+            html = html.replace(/src="([^"]+)"/g, (match, src) => {
+              if (src.startsWith('http')) return match;
+              if (src.startsWith('/')) return `src="${window.location.origin}${src}"`;
+              return `src="${window.location.origin}/${src}"`;
+            });
+
+            // Also fix background images in styles
+            css = css.replace(/url\(['"]?([^'")]+)['"]?\)/g, (match, url) => {
+              if (url.startsWith('http') || url.startsWith('data:')) return match;
+              if (url.startsWith('/')) return `url('${window.location.origin}${url}')`;
+              return `url('${window.location.origin}/${url}')`;
+            });
+
             // Close the temporary sheet
             sheet.close();
             

@@ -18,6 +18,10 @@ declare global {
   }
 }
 
+// Store the rolls made during this session
+const recentRolls: any[] = [];
+const MAX_ROLLS_STORED = 20; // Store up to 20 recent rolls
+
 Hooks.once("init", () => {
   console.log(`Initializing ${moduleId}`);
   
@@ -111,6 +115,63 @@ Hooks.once("ready", () => {
   setTimeout(() => {
     initializeWebSocket();
   }, 1000);
+});
+
+Hooks.on("createChatMessage", (message: any) => {
+  if (message.isRoll && message.rolls?.length > 0) {
+    ModuleLogger.info(`${moduleId} | Detected dice roll from ${message.user?.name || 'unknown'}`);
+    
+    // Generate a unique ID using the message ID to prevent duplicates
+    const rollId = message.id;
+    
+    // Format roll data
+    const rollData = {
+      id: rollId,
+      messageId: message.id,
+      user: {
+        id: message.user?.id,
+        name: message.user?.name
+      },
+      speaker: message.speaker,
+      flavor: message.flavor || "",
+      rollTotal: message.rolls[0].total,
+      formula: message.rolls[0].formula,
+      isCritical: message.rolls[0].isCritical || false,
+      isFumble: message.rolls[0].isFumble || false,
+      dice: message.rolls[0].dice?.map((d: any) => ({
+        faces: d.faces,
+        results: d.results.map((r: any) => ({
+          result: r.result,
+          active: r.active
+        }))
+      })),
+      timestamp: Date.now()
+    };
+    
+    // Check if this roll ID already exists in recentRolls
+    const existingIndex = recentRolls.findIndex(roll => roll.id === rollId);
+    if (existingIndex !== -1) {
+      // If it exists, update it instead of adding a new entry
+      recentRolls[existingIndex] = rollData;
+    } else {
+      // Add to recent rolls
+      recentRolls.unshift(rollData);
+      
+      // Trim the array if needed
+      if (recentRolls.length > MAX_ROLLS_STORED) {
+        recentRolls.length = MAX_ROLLS_STORED;
+      }
+    }
+    
+    // Send to relay server if connected
+    const module = (game as Game).modules.get(moduleId) as FoundryRestApi;
+    if (module.socketManager?.isConnected()) {
+      module.socketManager.send({
+        type: "roll-data",
+        data: rollData
+      });
+    }
+  }
 });
 
 function initializeWebSocket() {
@@ -494,6 +555,225 @@ function initializeWebSocket() {
           uuid: data.uuid,
           error: (error as Error).message,
           message: "Failed to delete entity"
+        });
+      }
+    });
+
+    // Handle roll data request (get list of rolls)
+    module.socketManager.onMessageType("get-rolls", async (data) => {
+      ModuleLogger.info(`${moduleId} | Received request for roll data`);
+      
+      module.socketManager.send({
+        type: "rolls-data",
+        requestId: data.requestId,
+        data: recentRolls.slice(0, data.limit || 20)
+      });
+    });
+
+    // Handle last roll request
+    module.socketManager.onMessageType("get-last-roll", (data) => {
+      ModuleLogger.info(`${moduleId} | Received request for last roll data`);
+      
+      module.socketManager.send({
+        type: "last-roll-data",
+        requestId: data.requestId,
+        data: recentRolls.length > 0 ? recentRolls[0] : null
+      });
+    });
+
+    // Handle roll request
+    module.socketManager.onMessageType("perform-roll", async (data) => {
+      ModuleLogger.info(`${moduleId} | Received roll request:`, data);
+      
+      try {
+        // Validate the roll formula
+        if (!data.formula) {
+          throw new Error("Roll formula is required");
+        }
+        
+        // Create a new Roll instance
+        const roll = new Roll(data.formula);
+        
+        // Generate a unique rollId for this roll
+        const rollId = `manual_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        // Evaluate the roll using evaluateSync
+        await roll.evaluate();
+        
+        // Create chat message if requested
+        if (data.createChatMessage !== false) {
+          // Process whisper recipients
+          let whisperRecipients = [];
+          
+          if (data.whisper && Array.isArray(data.whisper)) {
+            // Try to get valid user IDs for whisper
+            for (const entry of data.whisper) {
+              // If it's already a valid user ID, use it directly
+              const user = (game as Game).users?.get(entry);
+              if (user) {
+                whisperRecipients.push(entry);
+                continue;
+              }
+              
+              // Try to find by name
+              const userByName = (game as Game).users?.find(u => u.name === entry);
+              if (userByName) {
+                whisperRecipients.push(userByName.id);
+              }
+            }
+          }
+          
+          // Determine speaker
+          let speaker;
+          
+          if (data.speaker) {
+            // If speaker is provided, use it
+            if (typeof data.speaker === 'string') {
+              // First try to find as token ID
+              const activeScene = (game as Game).scenes?.viewed;
+              let token = activeScene?.tokens?.get(data.speaker);
+              
+              // If not found by ID, try to find token by name
+              if (!token) {
+                token = activeScene?.tokens?.find(t => t.name === data.speaker);
+              }
+              
+              if (token) {
+                speaker = ChatMessage.getSpeaker({ token });
+              } else {
+                // If not a token, try as actor ID
+                const actor = (game as Game).actors?.get(data.speaker);
+                if (actor) {
+                  // Look for tokens representing this actor on the current scene
+                  const tokenForActor = activeScene?.tokens?.find(t => {
+                    // Check if this token represents the actor
+                    return t.actor?.id === actor.id;
+                  });
+                  
+                  if (tokenForActor) {
+                    speaker = ChatMessage.getSpeaker({ token: tokenForActor });
+                  } else {
+                    // No token found, use actor directly
+                    speaker = ChatMessage.getSpeaker({ actor });
+                  }
+                } else {
+                  // Try to find by actor name
+                  const actorByName = (game as Game).actors?.find(a => a.name === data.speaker);
+                  if (actorByName) {
+                    // Look for tokens representing this actor on the current scene
+                    const tokenForNamedActor = activeScene?.tokens?.find(t => {
+                      return t.actor?.id === actorByName.id;
+                    });
+                    
+                    if (tokenForNamedActor) {
+                      speaker = ChatMessage.getSpeaker({ token: tokenForNamedActor });
+                    } else {
+                      // No token found, use actor directly
+                      speaker = ChatMessage.getSpeaker({ actor: actorByName });
+                    }
+                  } else {
+                    // Just set the alias if nothing found
+                    speaker = ChatMessage.getSpeaker();
+                    speaker.alias = data.speaker;
+                  }
+                }
+              }
+            } else {
+              // If it's an object, use it directly
+              speaker = data.speaker;
+            }
+          } else {
+            // Default speaker
+            speaker = ChatMessage.getSpeaker();
+          }
+          
+          const chatData = {
+            user: (game as Game).user?.id,
+            speaker: speaker,
+            flavor: data.flavor || `Rolling ${data.formula}`,
+            rolls: [roll],
+            sound: CONFIG.sounds.dice,
+            whisper: whisperRecipients
+          };
+          
+          // Create chat message
+          try {
+            await ChatMessage.create(chatData);
+            
+            // Format roll data for response
+            const rollData = {
+              formula: roll.formula,
+              total: roll.total,
+              isCritical: (roll as any).isCritical || false,
+              isFumble: (roll as any).isFumble || false,
+              dice: roll.dice.map((d: any) => ({
+                faces: d.faces,
+                results: d.results.map((r: any) => ({
+                  result: r.result,
+                  active: r.active
+                }))
+              })),
+              timestamp: Date.now()
+            };
+            // as the createChatMessage hook will handle adding it to recentRolls
+            module.socketManager.send({
+              type: "roll-result",
+              requestId: data.requestId,
+              success: true,
+              data: {
+                id: rollId,
+                chatMessageCreated: true,
+                roll: rollData
+              }
+            });
+            return;
+          } catch (chatError) {
+            ModuleLogger.error(`${moduleId} | Error creating chat message with roll property:`, chatError);
+          }
+        }
+        
+        // If we get here, either createChatMessage was false or both attempts to create a chat message failed
+        // Format roll data for response
+        const rollData = {
+          id: rollId,
+          formula: roll.formula,
+          total: roll.total,
+          isCritical: (roll as any).isCritical || false,
+          isFumble: (roll as any).isFumble || false,
+          dice: roll.dice.map((d: any) => ({
+            faces: d.faces,
+            results: d.results.map((r: any) => ({
+              result: r.result,
+              active: r.active
+            }))
+          })),
+          timestamp: Date.now()
+        };
+        
+        // Add to recent rolls if chat message wasn't created
+        if (data.createChatMessage === false) {
+          // Add to recent rolls
+          recentRolls.unshift(rollData);
+          
+          // Trim the array if needed
+          if (recentRolls.length > MAX_ROLLS_STORED) {
+            recentRolls.length = MAX_ROLLS_STORED;
+          }
+        }
+        
+        module.socketManager.send({
+          type: "roll-result",
+          requestId: data.requestId,
+          success: true,
+          data: rollData
+        });
+      } catch (error) {
+        ModuleLogger.error(`${moduleId} | Error performing roll:`, error);
+        module.socketManager.send({
+          type: "roll-result",
+          requestId: data.requestId,
+          success: false,
+          error: (error as Error).message
         });
       }
     });

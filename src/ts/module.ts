@@ -934,12 +934,47 @@ function initializeWebSocket() {
             });
             
             // 6. Important: Add foundry core styles
+            const baseUrl = window.location.origin;
+            ModuleLogger.debug(`${moduleId} | Base URL for fetching CSS: ${baseUrl}`);
+            
+            // Try different path patterns that might work with Foundry
             const coreStylesheets = [
-              `${window.location.origin}/css/style.css`,  // Try alternative path
-              `${window.location.origin}/styles/foundry.css`,
-              `${window.location.origin}/ui/sheets.css`,
-              `${window.location.origin}/systems/${(game as Game).system.id}/styles/system.css`
+              // Try various likely paths for foundry core styles
+              `${baseUrl}/css/style.css`,
+              `${baseUrl}/styles/style.css`,
+              `${baseUrl}/styles/foundry.css`,
+              `${baseUrl}/ui/sheets.css`,
+              // Try with /game path prefix (common in some Foundry setups)
+              `${baseUrl}/game/styles/foundry.css`,
+              `${baseUrl}/game/ui/sheets.css`,
+              // System-specific styles
+              `${baseUrl}/systems/${(game as Game).system.id}/system.css`,
+              `${baseUrl}/systems/${(game as Game).system.id}/styles/system.css`,
+              // Try with /game path prefix for system styles
+              `${baseUrl}/game/systems/${(game as Game).system.id}/system.css`,
+              `${baseUrl}/game/systems/${(game as Game).system.id}/styles/system.css`
             ];
+            
+            // Add more debugging to identify the correct paths
+            ModuleLogger.debug(`${moduleId} | All stylesheet links in document:`, 
+              Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
+                .map(link => link.getAttribute('href'))
+                .filter(Boolean)
+            );
+            
+            // Extract potential stylesheet paths from existing links
+            const existingCSSPaths = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
+              .map(link => link.getAttribute('href'))
+              .filter(Boolean)
+              .filter(href => !href.includes('fonts.googleapis.com') && !href.includes('//'));
+            
+            // Add these paths to our core stylesheets
+            coreStylesheets.push(...existingCSSPaths);
+            
+            // Debug current document styles to see what's actually loaded
+            ModuleLogger.debug(`${moduleId} | All style elements in document:`, 
+              document.querySelectorAll('style').length
+            );
             
             const corePromises = coreStylesheets.map(async (path) => {
               try {
@@ -950,6 +985,8 @@ function initializeWebSocket() {
                   return '';
                 }
                 
+                // If successful, log it clearly
+                ModuleLogger.info(`${moduleId} | Successfully loaded CSS from: ${path}`);
                 return await response.text();
               } catch (e) {
                 ModuleLogger.warn(`${moduleId} | Failed to fetch core CSS: ${e}`);

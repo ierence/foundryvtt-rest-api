@@ -210,36 +210,55 @@ function initializeWebSocket() {
           }
         }
         
-        // Convert string filter to a filter function if provided
-        let filterFunc = null;
-        if (data.filter) {
-          filterFunc = (result: any) => {
-            if (!result.item.documentType) return false;
-            return result.item.documentType.toLowerCase() === data.filter.toLowerCase();
-          };
-        }
+        // First perform the search without any filters to get all results
+        const allResults = await window.QuickInsert.search(data.query, null, 200);
+        console.log(`${moduleId} | Initial search returned ${allResults.length} results`);
         
-        // Perform the search with the filter function
-        const results = await window.QuickInsert.search(data.query, filterFunc, 100);
-        console.log(`${moduleId} | Search results:`, results);
+        // Apply filters if provided
+        let filteredResults = allResults;
+        if (data.filter) {
+          console.log(`${moduleId} | Applying filters:`, data.filter);
+          
+          // Parse filter string if it's a string
+          const filters = typeof data.filter === 'string' ? 
+            parseFilterString(data.filter) : data.filter;
+            
+          filteredResults = allResults.filter(result => {
+            // Apply all filters
+            return matchesAllFilters(result, filters);
+          });
+          
+          console.log(`${moduleId} | After filtering: ${filteredResults.length} results`);
+        }
         
         // Send results back to the server
         module.socketManager.send({
           type: "search-results",
           requestId: data.requestId,
-          results: results.map(result => {
+          results: filteredResults.map(result => {
             // Each result has an 'item' property containing the actual data
             const item = result.item;
-            return {
-              name: item.name,
-              id: item.id,
-              img: item.img,
+
+            console.log(`${moduleId} | type:`, item.constructor.name);
+            
+            // Include all available properties to help with future filtering
+            const resultObj = {
               documentType: item.documentType,
+              folder: item.folder,
+              id: item.id,
+              name: item.name,
+              package: item.package,
+              packageName: item.packageName,
+              subType: item.subType,
               uuid: item.uuid,
+              icon: item.icon,
+              journalLink: item.journalLink,
               tagline: item.tagline || "",
-              // Also include the formatted match for highlighting
-              formattedMatch: result.formattedMatch || ""
+              formattedMatch: result.formattedMatch || "",
+              resultType: item.constructor?.name
             };
+            
+            return resultObj;
           })
         });
       } catch (error) {
@@ -297,6 +316,87 @@ function initializeWebSocket() {
   } catch (error) {
     console.error(`${moduleId} | Error initializing WebSocket:`, error);
   }
+}
+
+/**
+ * Parse a filter string into a filter object
+ * Accepts formats like "documentType:Actor,folder:NPCs" or just "Actor" for backward compatibility
+ */
+function parseFilterString(filterStr: string): Record<string, string> {
+  // If filter is a simple string without colons, assume it's a document type for backward compatibility
+  if (!filterStr.includes(':')) {
+    return { documentType: filterStr };
+  }
+  
+  // Parse more complex filter strings
+  const filters: Record<string, string> = {};
+  const parts = filterStr.split(',');
+  
+  for (const part of parts) {
+    if (part.includes(':')) {
+      const [key, value] = part.split(':');
+      if (key && value) {
+        filters[key.trim()] = value.trim();
+      }
+    }
+  }
+  
+  return filters;
+}
+
+/**
+ * Check if a result matches all specified filters
+ */
+function matchesAllFilters(result: any, filters: Record<string, string>): boolean {
+  for (const [key, value] of Object.entries(filters)) {
+    // Skip empty filters
+    if (!value) continue;
+    
+    // Special case for resultType - check the constructor name of the item
+    if (key === "resultType") {
+      const itemConstructorName = result.item?.constructor?.name;
+      console.log(`${moduleId} | Comparing resultType: ${itemConstructorName} === ${value}`);
+      
+      if (!itemConstructorName || itemConstructorName.toLowerCase() !== value.toLowerCase()) {
+        return false;
+      }
+      continue;
+    }
+    
+    // For other properties, use the getPropertyByPath helper
+    let propertyValue = getPropertyByPath(result, key);
+    
+    // If we can't find the property or it doesn't match, filter it out
+    if (propertyValue === undefined || 
+        (typeof propertyValue === 'string' &&
+         propertyValue.toLowerCase() !== value.toLowerCase())) {
+      return false;
+    }
+  }
+  
+  return true;
+}
+
+/**
+ * Get a property from an object using a dot-notation path
+ * E.g., "item.documentType" or "constructor.name"
+ */
+function getPropertyByPath(obj: any, path: string): any {
+  // Handle special case for item properties (most common case)
+  if (!path.includes('.') && obj.item && obj.item[path] !== undefined) {
+    return obj.item[path];
+  }
+  
+  // For dot notation paths
+  const parts = path.split('.');
+  let current = obj;
+  
+  for (const part of parts) {
+    if (current === undefined || current === null) return undefined;
+    current = current[part];
+  }
+  
+  return current;
 }
 
 // Add button to the sidebar

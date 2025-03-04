@@ -1,4 +1,3 @@
-import { CommunicationPanel } from "./apps/communicationPanel";
 import { WebSocketManager } from "./network/webSocketManager";
 
 // WebSocket close codes
@@ -14,13 +13,11 @@ export enum WSCloseCodes {
 
 // Module-specific interfaces
 export interface FoundryGetActorsExternal extends Game.ModuleData<any> {
-  communicationPanel: CommunicationPanel;
   socketManager: WebSocketManager;
   api: FoundryGetActorsExternalAPI;
 }
 
 export interface FoundryGetActorsExternalAPI {
-  exportActors: () => Promise<string | null>;
   getWebSocketManager: () => WebSocketManager;
   search: (query: string, filter?: string) => Promise<any[]>;  // Add this line
   getByUuid: (uuid: string) => Promise<any>;  // Add this line

@@ -22,6 +22,8 @@ export interface FoundryGetActorsExternal extends Game.ModuleData<any> {
 export interface FoundryGetActorsExternalAPI {
   exportActors: () => Promise<string | null>;
   getWebSocketManager: () => WebSocketManager;
+  search: (query: string, filter?: string) => Promise<any[]>;  // Add this line
+  getByUuid: (uuid: string) => Promise<any>;  // Add this line
 }
 
 export interface ActorIndexEntry {
@@ -84,16 +86,6 @@ export declare namespace ServerRoutes {
       path: string;
       description: string;
     }[];
-  }
-}
-
-// Augment existing types only if needed
-declare global {
-  namespace Foundry {
-    interface FilePicker {
-      // Only add methods that are missing from the original types
-      deleteDirectory?(target: string, path: string): Promise<void>;
-    }
   }
 }
 

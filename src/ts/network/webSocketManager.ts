@@ -1,4 +1,4 @@
-import { WSCloseCodes, WebSocketMessage } from "../types";
+import { WSCloseCodes } from "../types";
 import { moduleId } from "../constants";
 
 type MessageHandler = (data: any) => void;
@@ -12,12 +12,13 @@ export class WebSocketManager {
   private reconnectAttempts: number = 0;
   private maxReconnectAttempts: number = 10;
   private clientId: string;
+  private pingInterval: number | null = null;
   private isConnecting: boolean = false;
 
   constructor(url: string, token: string) {
     this.url = url;
     this.token = token;
-    this.clientId = `foundry-${game.user?.id || Math.random().toString(36).substring(2, 15)}`;
+    this.clientId = `foundry-${(game as Game).user?.id || Math.random().toString(36).substring(2, 15)}`;
     console.log(`${moduleId} | Created WebSocketManager with clientId: ${this.clientId}`);
   }
 
@@ -41,11 +42,36 @@ export class WebSocketManager {
       wsUrl.searchParams.set('token', this.token);
       
       console.log(`${moduleId} | Connecting to WebSocket at ${wsUrl.toString()}`);
+      
+      // Create WebSocket and set up event handlers
       this.socket = new WebSocket(wsUrl.toString());
 
-      this.socket.addEventListener('open', this.onOpen.bind(this));
-      this.socket.addEventListener('close', this.onClose.bind(this));
-      this.socket.addEventListener('error', this.onError.bind(this));
+      // Add timeout for connection attempt
+      const connectionTimeout = window.setTimeout(() => {
+        if (this.socket && this.socket.readyState === WebSocket.CONNECTING) {
+          console.error(`${moduleId} | Connection timed out`);
+          this.socket.close();
+          this.socket = null;
+          this.isConnecting = false;
+          this.scheduleReconnect();
+        }
+      }, 5000); // 5 second timeout
+
+      this.socket.addEventListener('open', (event) => {
+        window.clearTimeout(connectionTimeout);
+        this.onOpen(event);
+      });
+      
+      this.socket.addEventListener('close', (event) => {
+        window.clearTimeout(connectionTimeout);
+        this.onClose(event);
+      });
+      
+      this.socket.addEventListener('error', (event) => {
+        window.clearTimeout(connectionTimeout);
+        this.onError(event);
+      });
+      
       this.socket.addEventListener('message', this.onMessage.bind(this));
     } catch (error) {
       console.error(`${moduleId} | Error creating WebSocket:`, error);
@@ -66,6 +92,11 @@ export class WebSocketManager {
       this.reconnectTimer = null;
     }
     
+    if (this.pingInterval !== null) {
+      window.clearInterval(this.pingInterval);
+      this.pingInterval = null;
+    }
+    
     this.reconnectAttempts = 0;
     this.isConnecting = false;
   }
@@ -75,25 +106,20 @@ export class WebSocketManager {
   }
 
   send(data: any): boolean {
-    if (!this.isConnected()) {
-      console.warn(`${moduleId} | Cannot send message, WebSocket not connected`);
-      return false;
-    }
-
-    try {
-      console.log(`${moduleId} | Send called, readyState: ${this.socket?.readyState}`);
-      
-      // Ensure we're connected
-      if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+    console.log(`${moduleId} | Send called, readyState: ${this.socket?.readyState}`);
+    
+    // Ensure we're connected
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      try {
         console.log(`${moduleId} | Sending message:`, data);
         this.socket.send(JSON.stringify(data));
         return true;
-      } else {
-        console.warn(`${moduleId} | WebSocket not ready, state: ${this.socket?.readyState}`);
+      } catch (error) {
+        console.error(`${moduleId} | Error sending message:`, error);
         return false;
       }
-    } catch (error) {
-      console.error(`${moduleId} | Error sending message:`, error);
+    } else {
+      console.warn(`${moduleId} | WebSocket not ready, state: ${this.socket?.readyState}`);
       return false;
     }
   }
@@ -102,7 +128,7 @@ export class WebSocketManager {
     this.messageHandlers.set(type, handler);
   }
 
-  private onOpen(event: Event): void {
+  private onOpen(_event: Event): void {
     console.log(`${moduleId} | WebSocket connected`);
     this.isConnecting = false;
     this.reconnectAttempts = 0;
@@ -111,7 +137,7 @@ export class WebSocketManager {
     this.send({ type: "ping" });
     
     // Start ping interval
-    window.setInterval(() => {
+    this.pingInterval = window.setInterval(() => {
       if (this.isConnected()) {
         this.send({ type: "ping" });
       }
@@ -122,6 +148,12 @@ export class WebSocketManager {
     console.log(`${moduleId} | WebSocket disconnected: ${event.code} - ${event.reason}`);
     this.socket = null;
     this.isConnecting = false;
+    
+    // Clear ping interval
+    if (this.pingInterval !== null) {
+      window.clearInterval(this.pingInterval);
+      this.pingInterval = null;
+    }
     
     // Don't reconnect if this was a normal closure
     if (event.code !== WSCloseCodes.Normal) {
@@ -137,9 +169,13 @@ export class WebSocketManager {
   private onMessage(event: MessageEvent): void {
     try {
       const data = JSON.parse(event.data);
+      console.log(`${moduleId} | Received message:`, data);
       
       if (data.type && this.messageHandlers.has(data.type)) {
+        console.log(`${moduleId} | Handling message of type: ${data.type}`);
         this.messageHandlers.get(data.type)!(data);
+      } else if (data.type) {
+        console.warn(`${moduleId} | No handler for message type: ${data.type}`);
       }
     } catch (error) {
       console.error(`${moduleId} | Error processing message:`, error);
@@ -158,8 +194,8 @@ export class WebSocketManager {
       return;
     }
     
-    const delay = Math.min(1000 * Math.pow(1.5, this.reconnectAttempts), 30000);
-    console.log(`${moduleId} | Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
+    const delay = Math.min(30000, Math.pow(2, this.reconnectAttempts) * 1000);
+    console.log(`${moduleId} | Scheduling reconnect in ${delay}ms (attempt ${this.reconnectAttempts})`);
     
     this.reconnectTimer = window.setTimeout(() => {
       this.reconnectTimer = null;

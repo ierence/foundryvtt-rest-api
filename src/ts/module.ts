@@ -2,8 +2,6 @@ import "../styles/style.scss";
 import { CommunicationPanel } from "./apps/communicationPanel";
 import { moduleId } from "./constants";
 import { FoundryGetActorsExternal } from "./types";
-import { exportScene } from "../utils/export";
-import { importScene } from "../utils/import";
 import { WebSocketManager } from "./network/webSocketManager";
 import { exportActors } from "../utils/actorExport";
 import { ActorExportForm } from "./apps/actorExportForm"; // Add this import
@@ -409,42 +407,3 @@ Hooks.on("renderActorDirectory", (_: Application, html: JQuery) => {
   });
   html.find(".directory-header .action-buttons").append(button);
 });
-
-// Scene directory context menu
-Hooks.on(
-  "getSceneDirectoryEntryContext",
-  (
-    _html: JQuery,
-    options: {
-      name: string;
-      icon: string;
-      condition: ((li: any) => any) | (() => any);
-      callback: ((li: any) => Promise<void>) | (() => Promise<void>);
-    }[]
-  ) => {
-    options.push({
-      name: "Export Scene Package",
-      icon: '<i class="fas fa-file-export"></i>',
-      condition: (_) => (game as Game).user?.isGM,
-      callback: (li) => exportScene(li.data("documentId")),
-    });
-
-    options.push({
-      name: "Import Scene Package", 
-      icon: '<i class="fas fa-file-import"></i>',
-      condition: () => (game as Game).user?.isGM,
-      callback: async () => {
-        const input = document.createElement("input");
-        input.type = "file";
-        input.accept = ".zip";
-        input.onchange = async (event: Event) => {
-          const file = (event.target as HTMLInputElement).files?.[0];
-          if (file) {
-            await importScene(file);
-          }
-        };
-        input.click();
-      },
-    });
-  }
-);

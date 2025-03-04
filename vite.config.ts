@@ -24,10 +24,11 @@ const foundryVttDataPath = path.join(
 export default defineConfig({
   build: {
     sourcemap: true,
+    outDir: "dist", // Add this line to output to dist directory
     rollupOptions: {
       input: "src/ts/module.ts",
       output: {
-        dir: path.join(foundryVttDataPath, moduleId, "scripts"),
+        dir: process.env.CI ? "dist/scripts" : path.join(foundryVttDataPath, moduleId, "scripts"),
         entryFileNames: "module.js",
         format: "es",
       },
@@ -36,14 +37,28 @@ export default defineConfig({
   plugins: [
     updateModuleManifestPlugin(),
     scss({
-      output: path.join(foundryVttDataPath, moduleId, "style.css"),
+      output: function(styles) {
+        // Write to FoundryVTT path for development
+        if (!process.env.CI) {
+          fsPromises.writeFile(path.join(foundryVttDataPath, moduleId, "style.css"), styles);
+        }
+        // Always write to dist for CI
+        fsPromises.mkdir("dist", { recursive: true })
+          .then(() => fsPromises.writeFile("dist/style.css", styles));
+      },
       sourceMap: true,
       watch: ["src/styles/*.scss"],
     }),
     copy({
       targets: [
-        { src: "src/languages", dest: path.join(foundryVttDataPath, moduleId) },
-        { src: "src/templates", dest: path.join(foundryVttDataPath, moduleId) },
+        // Development targets
+        ...(!process.env.CI ? [
+          { src: "src/languages", dest: path.join(foundryVttDataPath, moduleId) },
+          { src: "src/templates", dest: path.join(foundryVttDataPath, moduleId) }
+        ] : []), 
+        // CI/Production targets
+        { src: "src/languages", dest: "dist" },
+        { src: "src/templates", dest: "dist" }
       ],
       hook: "writeBundle",
     }),
@@ -54,8 +69,13 @@ function updateModuleManifestPlugin(): Plugin {
   return {
     name: "update-module-manifest",
     async writeBundle(): Promise<void> {
-      // Create dist directory in FoundryVTT modules path
-      await fsPromises.mkdir(path.join(foundryVttDataPath, moduleId), { recursive: true });
+      // Create directory in FoundryVTT modules path (for development)
+      if (!process.env.CI) {
+        await fsPromises.mkdir(path.join(foundryVttDataPath, moduleId), { recursive: true });
+      }
+
+      // Always create dist directory (for CI/production)
+      await fsPromises.mkdir("dist", { recursive: true });
 
       const packageContents = JSON.parse(
         await fsPromises.readFile("./package.json", "utf-8")
@@ -80,9 +100,17 @@ function updateModuleManifestPlugin(): Plugin {
         }
       }
 
-      // Write updated manifest to FoundryVTT modules path
+      // Write updated manifest to FoundryVTT modules path (for development)
+      if (!process.env.CI) {
+        await fsPromises.writeFile(
+          path.join(foundryVttDataPath, moduleId, "module.json"),
+          JSON.stringify(manifestJson, null, 4)
+        );
+      }
+
+      // Always write updated manifest to dist directory (for CI/production)
       await fsPromises.writeFile(
-        path.join(foundryVttDataPath, moduleId, "module.json"),
+        "dist/module.json",
         JSON.stringify(manifestJson, null, 4)
       );
     },

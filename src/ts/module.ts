@@ -777,6 +777,95 @@ function initializeWebSocket() {
         });
       }
     });
+
+    // Handle actor sheet HTML request
+    module.socketManager.onMessageType("get-actor-sheet-html", async (data) => {
+      ModuleLogger.info(`${moduleId} | Received actor sheet HTML request for UUID: ${data.uuid}`);
+      
+      try {
+        // Get the actor from its UUID
+        const actor = await fromUuid(data.uuid) as Actor;
+        if (!actor) {
+          ModuleLogger.error(`${moduleId} | Actor not found for UUID: ${data.uuid}`);
+          module.socketManager.send({
+            type: "actor-sheet-html-response",
+            requestId: data.requestId,
+            data: { error: "Actor not found", uuid: data.uuid }
+          });
+          return;
+        }
+        
+        // Check if it's an actor
+        if (actor.documentName !== "Actor") {
+          ModuleLogger.error(`${moduleId} | Entity is not an Actor: ${data.uuid}`);
+          module.socketManager.send({
+            type: "actor-sheet-html-response",
+            requestId: data.requestId,
+            data: { error: "Entity is not an Actor", uuid: data.uuid }
+          });
+          return;
+        }
+        
+        // Create a temporary sheet to render
+        const sheet = actor.sheet?.render(true) as ActorSheet;
+        
+        // Wait for the sheet to render
+        setTimeout(async () => {
+          try {
+            // Get the HTML content
+            if (!sheet.element || !sheet.element[0]) {
+              throw new Error("Failed to render actor sheet");
+            }
+            
+            const html = sheet.element[0].outerHTML;
+            
+            // Get the associated CSS
+            const appStyles = document.querySelectorAll('style[data-appid]');
+            let css = '';
+            appStyles.forEach(style => {
+              if (Number((style as HTMLElement).dataset.appid) === sheet.appId) {
+                css += style.textContent;
+              }
+            });
+            
+            // Close the temporary sheet
+            sheet.close();
+            
+            // Send the HTML and CSS back
+            module.socketManager.send({
+              type: "actor-sheet-html-response",
+              requestId: data.requestId,
+              data: { html, css, uuid: data.uuid }
+            });
+
+            // Add confirmation log
+            ModuleLogger.debug(`${moduleId} | Sent actor sheet HTML response with requestId: ${data.requestId}`);
+            ModuleLogger.debug(`${moduleId} | HTML length: ${html.length}, CSS length: ${css.length}`);
+          } catch (renderError) {
+            ModuleLogger.error(`${moduleId} | Error capturing actor sheet HTML:`, renderError);
+            module.socketManager.send({
+              type: "actor-sheet-html-response",
+              requestId: data.requestId,
+              data: { error: "Failed to capture actor sheet HTML", uuid: data.uuid }
+            });
+            
+            // Make sure to close the sheet if it was created
+            if (sheet && typeof sheet.close === 'function') {
+              sheet.close();
+            }
+          }
+        }, 500); // Small delay to ensure rendering is complete
+        
+      } catch (error) {
+        ModuleLogger.error(`${moduleId} | Error rendering actor sheet:`, error);
+        module.socketManager.send({
+          type: "actor-sheet-html-response",
+          requestId: data.requestId,
+          data: { error: "Failed to render actor sheet", uuid: data.uuid }
+        });
+      }
+    });
+
   } catch (error) {
     ModuleLogger.error(`${moduleId} | Error initializing WebSocket:`, error);
   }

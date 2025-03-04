@@ -167,7 +167,7 @@ export class WebSocketManager {
     this.isConnecting = false;
   }
 
-  private onMessage(event: MessageEvent): void {
+  private async onMessage(event: MessageEvent): Promise<void> {
     try {
       const data = JSON.parse(event.data);
       ModuleLogger.info(`${moduleId} | Received message:`, data);

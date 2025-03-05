@@ -236,20 +236,19 @@ function initializeWebSocket() {
             return;
           }
         }
-        
-        const allResults = await window.QuickInsert.search(data.query, null, 200);
-        ModuleLogger.info(`${moduleId} | Initial search returned ${allResults.length} results`);
-        
-        let filteredResults = allResults;
+
+        let filterFunc = null;
         if (data.filter) {
-          ModuleLogger.info(`${moduleId} | Applying filters:`, data.filter);
           const filters = typeof data.filter === 'string' ? 
             parseFilterString(data.filter) : data.filter;
-            
-          filteredResults = allResults.filter(result => {
+
+          filterFunc = (result: any) => {
             return matchesAllFilters(result, filters);
-          });
+          };
         }
+        
+        const filteredResults = await window.QuickInsert.search(data.query, filterFunc, 200);
+        ModuleLogger.info(`${moduleId} | Search returned ${filteredResults.length} results`);
         
         module.socketManager.send({
           type: "search-results",
@@ -864,9 +863,6 @@ function initializeWebSocket() {
             
             ModuleLogger.debug(`${moduleId} | Extracted ${uniqueClassNames.length} unique classes and ${uniqueIds.length} unique IDs`);
             
-            // Create a mapping of elements to their styles for debugging
-            const styleMap: Record<string, string[]> = {};
-            
             // 4. Collect all stylesheets in the document
             const allStyles = document.querySelectorAll('style');
             const allLinks = document.querySelectorAll('link[rel="stylesheet"]');
@@ -1114,6 +1110,7 @@ function matchesAllFilters(result: any, filters: Record<string, string>): boolea
   for (const [key, value] of Object.entries(filters)) {
     if (!value) continue;
     
+    // Special handling for resultType (constructor name)
     if (key === "resultType") {
       const itemConstructorName = result.item?.constructor?.name;
       if (!itemConstructorName || itemConstructorName.toLowerCase() !== value.toLowerCase()) {
@@ -1122,6 +1119,48 @@ function matchesAllFilters(result: any, filters: Record<string, string>): boolea
       continue;
     }
     
+    // Special handling for package (compendium) paths
+    if (key === "package" && result.item) {
+      const packageValue = result.item.package;
+      if (!packageValue) return false;
+      
+      // Check if the package matches or if it's a part of the full path
+      if (packageValue.toLowerCase() !== value.toLowerCase() && 
+          !(`Compendium.${packageValue}`.toLowerCase() === value.toLowerCase())) {
+        return false;
+      }
+      continue;
+    }
+    
+    // Special handling for folder references
+    if (key === "folder" && result.item) {
+      const folderValue = result.item.folder;
+      
+      // No folder when one is required
+      if (!folderValue && value) return false;
+      
+      // Folder exists, check various formats:
+      if (folderValue) {
+        const folderIdMatch = typeof folderValue === 'object' ? folderValue.id : folderValue;
+        
+        // Accept any of these formats:
+        // - Just the ID: "zmAZJmay9AxvRNqh"
+        // - Full Folder UUID: "Folder.zmAZJmay9AxvRNqh"
+        // - Object format with ID
+        if (value === folderIdMatch || 
+            value === `Folder.${folderIdMatch}` ||
+            `Folder.${value}` === folderIdMatch) {
+          continue; // Match found, continue to next filter
+        }
+        
+        // If we get here, folder doesn't match
+        return false;
+      }
+      
+      continue;
+    }
+    
+    // Standard property handling
     let propertyValue;
     if (!key.includes('.') && result.item && result.item[key] !== undefined) {
       propertyValue = result.item[key];
@@ -1140,6 +1179,7 @@ function matchesAllFilters(result: any, filters: Record<string, string>): boolea
       propertyValue = current;
     }
     
+    // If the property is missing or doesn't match, filter it out
     if (propertyValue === undefined || 
         (typeof propertyValue === 'string' &&
          propertyValue.toLowerCase() !== value.toLowerCase())) {

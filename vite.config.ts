@@ -4,7 +4,7 @@ import scss from "rollup-plugin-scss";
 import { defineConfig, Plugin } from "vite";
 import * as path from "path";
 import * as os from "os";
-import { id as moduleId } from "./src/module.json"; // Add this import at the top
+import { id as moduleId } from "./src/module.json";
 
 const moduleVersion = process.env.MODULE_VERSION;
 const githubProject = process.env.GH_PROJECT;
@@ -21,10 +21,25 @@ const foundryVttDataPath = path.join(
   "modules"
 );
 
+// Ensure the Foundry VTT modules directory exists
+async function ensureDirectory(directoryPath) {
+  try {
+    await fsPromises.mkdir(directoryPath, { recursive: true });
+  } catch (error) {
+    console.error(`Error creating directory ${directoryPath}:`, error);
+  }
+}
+
+// Create the module directory before starting the build
+if (!process.env.CI) {
+  const moduleDir = path.join(foundryVttDataPath, moduleId);
+  ensureDirectory(moduleDir);
+}
+
 export default defineConfig({
   build: {
     sourcemap: true,
-    outDir: "dist", // Add this line to output to dist directory
+    outDir: "dist",
     rollupOptions: {
       input: "src/ts/module.ts",
       output: {
@@ -37,14 +52,16 @@ export default defineConfig({
   plugins: [
     updateModuleManifestPlugin(),
     scss({
-      output: function(styles) {
+      output: async function(styles) {
         // Write to FoundryVTT path for development
         if (!process.env.CI) {
-          fsPromises.writeFile(path.join(foundryVttDataPath, moduleId, "style.css"), styles);
+          const moduleDir = path.join(foundryVttDataPath, moduleId);
+          await ensureDirectory(moduleDir);
+          await fsPromises.writeFile(path.join(moduleDir, "style.css"), styles);
         }
         // Always write to dist for CI
-        fsPromises.mkdir("dist", { recursive: true })
-          .then(() => fsPromises.writeFile("dist/style.css", styles));
+        await ensureDirectory("dist");
+        await fsPromises.writeFile("dist/style.css", styles);
       },
       sourceMap: true,
       watch: ["src/styles/*.scss"],
@@ -71,11 +88,11 @@ function updateModuleManifestPlugin(): Plugin {
     async writeBundle(): Promise<void> {
       // Create directory in FoundryVTT modules path (for development)
       if (!process.env.CI) {
-        await fsPromises.mkdir(path.join(foundryVttDataPath, moduleId), { recursive: true });
+        await ensureDirectory(path.join(foundryVttDataPath, moduleId));
       }
 
       // Always create dist directory (for CI/production)
-      await fsPromises.mkdir("dist", { recursive: true });
+      await ensureDirectory("dist");
 
       const packageContents = JSON.parse(
         await fsPromises.readFile("./package.json", "utf-8")

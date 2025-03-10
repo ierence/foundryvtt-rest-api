@@ -42,9 +42,9 @@ Hooks.once("init", () => {
     }
   });
   
-  (game as Game).settings.register(moduleId, "wsRelayToken", {
-    name: "WebSocket Relay Token",
-    hint: "Token for the WebSocket relay server (groups users together)",
+  (game as Game).settings.register(moduleId, "apiKey", {
+    name: "API Key",
+    hint: "API Key for authentication with the relay server",
     scope: "world",
     config: true,
     type: String,
@@ -177,7 +177,7 @@ Hooks.on("createChatMessage", (message: any) => {
 function initializeWebSocket() {
   // Get settings
   const wsRelayUrl = (game as Game).settings.get(moduleId, "wsRelayUrl") as string;
-  const wsRelayToken = (game as Game).settings.get(moduleId, "wsRelayToken") as string;
+  const apiKey = (game as Game).settings.get(moduleId, "apiKey") as string;
   const module = (game as Game).modules.get(moduleId) as FoundryRestApi;
   
   if (!wsRelayUrl) {
@@ -185,11 +185,11 @@ function initializeWebSocket() {
     return;
   }
   
-  ModuleLogger.info(`${moduleId} | Initializing WebSocket with URL: ${wsRelayUrl}, token: ${wsRelayToken}`);
+  ModuleLogger.info(`${moduleId} | Initializing WebSocket with URL: ${wsRelayUrl}, api key: ${apiKey}`);
   
   try {
     // Create and connect the WebSocket manager
-    module.socketManager = new WebSocketManager(wsRelayUrl, wsRelayToken);
+    module.socketManager = new WebSocketManager(wsRelayUrl, apiKey);
     module.socketManager.connect();
     
     // Register message handlers

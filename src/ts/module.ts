@@ -32,7 +32,7 @@ Hooks.once("init", () => {
     scope: "world",
     config: true,
     type: String,
-    default: "ws://localhost:3010",
+    default: "wss://foundryvtt-rest-api-relay.fly.dev",
     onChange: () => {
       const module = (game as Game).modules.get(moduleId) as FoundryRestApi;
       if (module.socketManager) {

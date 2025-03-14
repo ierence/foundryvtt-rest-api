@@ -33,14 +33,8 @@ Hooks.once("init", () => {
     config: true,
     type: String,
     default: "wss://foundryvtt-rest-api-relay.fly.dev",
-    onChange: () => {
-      const module = (game as Game).modules.get(moduleId) as FoundryRestApi;
-      if (module.socketManager) {
-        module.socketManager.disconnect();
-        initializeWebSocket();
-      }
-    }
-  });
+    requiresReload: true
+  } as any);
   
   (game as Game).settings.register(moduleId, "apiKey", {
     name: "API Key",
@@ -49,14 +43,8 @@ Hooks.once("init", () => {
     config: true,
     type: String,
     default: (game as Game).world.id,
-    onChange: () => {
-      const module = (game as Game).modules.get(moduleId) as FoundryRestApi;
-      if (module.socketManager) {
-        module.socketManager.disconnect();
-        initializeWebSocket();
-      }
-    }
-  });
+    requiresReload: true
+  } as any);;
 
   (game as Game).settings.register(moduleId, "logLevel", {
     name: "Log Level",

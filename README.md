@@ -2,7 +2,7 @@
 
 - Install the Founndry VTT module using the latest manifest link: [https://github.com/ThreeHats/foundryvtt-rest-api/releases/latest/download/module.json](https://github.com/ThreeHats/foundryvtt-rest-api/releases/latest/download/module.json)
     
-- Get an API key for the public relay server at [https://foundryvtt-rest-api-relay.fly.dev/](https://foundryvtt-rest-api-relay.fly.dev/) or you may Install and run the [Foundry REST Relay Server](https://github.com/ThreeHats/foundryvtt-rest-api-relay) locally
+- Get an API key for the public relay server at [https://foundryvtt-rest-api-relay.fly.dev/](https://foundryvtt-rest-api-relay.fly.dev/)
     
 - Download [Postman](https://www.postman.com/downloads/) and the import the latest [API Test Collection](https://github.com/ThreeHats/foundryvtt-rest-api-relay/blob/main/Foundry%20REST%20API%20Documentation.postman_collection.json) for an easy way to start testing endpoints.
     
@@ -16,10 +16,6 @@ Foundry REST API provides various API endpoints for fetching and interacting wit
 ## **Getting started guide**
 
 To start using the Foundry REST API, you need to -
-
-- Have an API key or have the relay server running on your local machine or at an address your foundry game can access.
-    
-- Have the URL of that server (and port if running locally) set as the "WebSocket Relay URL" in the settings for the Foundry REST API module.
     
 - Have your API key in the module settings.
     

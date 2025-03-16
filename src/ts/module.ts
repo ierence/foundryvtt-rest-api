@@ -1474,14 +1474,15 @@ function initializeWebSocket() {
       ModuleLogger.info(`${moduleId} | Received request to end encounter: ${data.encounterId}`);
       
       try {
-        if (!data.encounterId) {
-          throw new Error("Encounter ID is required");
+        let encounterId = data.encounterId;
+        if (!encounterId) {
+          encounterId = (game as Game).combat?.id;
         }
         
-        const combat = (game as Game).combats?.get(data.encounterId);
+        const combat = (game as Game).combats?.get(encounterId);
         
         if (!combat) {
-          throw new Error(`Encounter with ID ${data.encounterId} not found`);
+          throw new Error(`No encounter not found`);
         }
         
         await combat.delete();
@@ -1489,7 +1490,7 @@ function initializeWebSocket() {
         module.socketManager.send({
           type: "encounter-ended",
           requestId: data.requestId,
-          encounterId: data.encounterId,
+          encounterId: encounterId,
           message: "Encounter successfully ended"
         });
       } catch (error) {

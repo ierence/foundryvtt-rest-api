@@ -11,7 +11,7 @@ export class WebSocketManager {
   private messageHandlers: Map<string, MessageHandler> = new Map();
   private reconnectTimer: number | null = null;
   private reconnectAttempts: number = 0;
-  private maxReconnectAttempts: number = 10;
+  private maxReconnectAttempts: number = 20;
   private clientId: string;
   private pingInterval: number | null = null;
   private isConnecting: boolean = false;

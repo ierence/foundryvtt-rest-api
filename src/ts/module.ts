@@ -631,12 +631,7 @@ function initializeWebSocket() {
             }
             
             // Cast to an Item with any to access system-specific properties
-            const item = document as Item & {
-              toChat?: (options?: any) => Promise<any>;
-              displayCard?: (options: any) => Promise<any>;
-              system?: any;
-              type: string;
-            };
+            const item = document as any;
             
             ModuleLogger.info(`${moduleId} | Creating chat message for item: ${(item as any).name}`);
             
@@ -703,7 +698,7 @@ function initializeWebSocket() {
               ModuleLogger.info(`${moduleId} | Using D&D 5e item with action type: ${(item as any).system.actionType}`);
               
               // For D&D 5e with Midi-QOL, we need to use the item's use method
-              if ('use' in item && typeof (item as any).use === 'function') {
+              if (((item as Record<string, any>).system as Record<string, any>)?.actionType) {
                 // Create options for item use
                 const useOptions: any = {
                   configureDialog: false,
@@ -750,7 +745,7 @@ function initializeWebSocket() {
                 try {
                   // Use the item which should trigger Midi-QOL if installed
                   ModuleLogger.info(`${moduleId} | Using item with dialog auto-click enabled: ${(item as any).name}`);
-                  const useResult = await (item as any).use(useOptions);
+                  const useResult = await (((item as Record<string, any>).use) as Function)(useOptions);
                   messageId = useResult?.id || useResult; // Handle different return types
                   
                   ModuleLogger.info(`${moduleId} | Item used with use() method, should trigger Midi-QOL: ${(item as any).name}`);
@@ -759,23 +754,25 @@ function initializeWebSocket() {
                   
                   ModuleLogger.info(`${moduleId} | Restored original dialog methods after item use`);
                 }
-              } else if ((item as any).displayCard && typeof item.displayCard === 'function') {
+              } else if ((item as any).displayCard && typeof (item as any).displayCard === 'function') {
                 // Fallback to displayCard if use() not available
-                const cardResult = await item.displayCard({
+                const cardResult = await (item as any).displayCard({
                   createMessage: true,
                   speaker: speakerData,
                   ...(targetAcquired ? { target: targetToken } : {})
                 });
                 messageId = cardResult?.id;
               }
-            } else if (typeof item.toChat === 'function') {
+            } else if (typeof (item as any).toChat === 'function') {
               // Some systems use toChat()
               const chatOptions = targetAcquired ? { target: targetToken } : {};
-              const chatResult = await item.toChat(chatOptions);
+              const chatResult = await (item as any).toChat(chatOptions);
               messageId = chatResult?.id;
-            } else if (typeof item.displayCard === 'function') {
+            } else if (typeof (item as any).displayCard === 'function') {
               // DnD5e uses displayCard()
-              const cardResult = await item.displayCard({
+              // Use type assertion to ensure TypeScript knows displayCard is a function
+              const displayCard = (item as any).displayCard as (options: any) => Promise<any>;
+              const cardResult = await displayCard({
                 createMessage: true,
                 speaker: speakerData,
                 // If target acquired, add it to the options
@@ -808,10 +805,10 @@ function initializeWebSocket() {
               id: `item_display_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`,
               chatMessageCreated: true,
               itemDisplayed: {
-                uuid: item.uuid,
-                name: item.name,
-                type: item.type,
-                img: item.img
+                uuid: (item as any).uuid,
+                name: (item as any).name,
+                type: (item as any).type,
+                img: (item as any).img
               },
               target: targetAcquired ? {
                 uuid: targetToken?.uuid,

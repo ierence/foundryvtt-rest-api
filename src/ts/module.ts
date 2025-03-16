@@ -1153,6 +1153,355 @@ function initializeWebSocket() {
       }
     });
 
+    // Handle get encounters request
+    module.socketManager.onMessageType("get-encounters", async (data) => {
+      ModuleLogger.info(`${moduleId} | Received request for encounters`);
+      
+      try {
+        // Get all combats (encounters) in the world
+        const encounters = (game as Game).combats?.contents.map(combat => {
+          return {
+            id: combat.id,
+            name: combat.name,
+            round: combat.round,
+            turn: combat.turn,
+            current: combat.id === (game as Game).combat?.id,
+            combatants: combat.combatants.contents.map(c => ({
+              id: c.id,
+              name: c.name,
+              tokenId: c.token?.id,
+              actorId: c.actor?.id,
+              img: c.img,
+              initiative: c.initiative,
+              hidden: c.hidden,
+              defeated: c.isDefeated
+            }))
+          };
+        }) || [];
+
+        module.socketManager.send({
+          type: "encounters-list",
+          requestId: data.requestId,
+          encounters
+        });
+      } catch (error) {
+        ModuleLogger.error(`${moduleId} | Error getting encounters list:`, error);
+        module.socketManager.send({
+          type: "encounters-list",
+          requestId: data.requestId,
+          error: (error as Error).message,
+          encounters: []
+        });
+      }
+    });
+
+    // Handle start encounter request
+    module.socketManager.onMessageType("start-encounter", async (data) => {
+      ModuleLogger.info(`${moduleId} | Received request to start encounter with options:`, data);
+      
+      try {
+        // Create a new combat encounter
+        const combat = await Combat.create({ name: data.name || "New Encounter" });
+        
+        if (combat) {
+          await combat.startCombat();
+          // Add the specified tokens if any were provided
+          if (data.tokenUuids && data.tokenUuids.length > 0) {
+            const tokensData = [];
+            
+            for (const uuid of data.tokenUuids) {
+              try {
+                const token = await fromUuid(uuid);
+                if (token) {
+                  tokensData.push({
+                    tokenId: token.id ?? '',
+                    sceneId: token.parent.id
+                  });
+                }
+              } catch (err) {
+                ModuleLogger.warn(`${moduleId} | Failed to add token ${uuid} to combat:`, err);
+              }
+            }
+            
+            if (tokensData.length > 0) {
+              await combat.createEmbeddedDocuments("Combatant", tokensData);
+            }
+          }
+
+          // Add player combatants if specified
+          if (data.startWithPlayers) {
+            // Get the current viewed scene
+            const currentScene = (game as Game).scenes?.viewed;
+            
+            if (currentScene) {
+              // Get all tokens on the scene that have player actors
+              const playerTokens = currentScene.tokens?.filter(token => {
+              // Check if token has an actor and the actor is a player character
+              return !!token.actor && token.actor.hasPlayerOwner;
+              }) ?? [];
+              
+              // Create combatants from these tokens
+              const tokenData = playerTokens.map(token => ({
+              tokenId: token.id,
+              sceneId: currentScene.id
+              }));
+              
+              if (tokenData.length > 0) {
+              await combat.createEmbeddedDocuments("Combatant", tokenData);
+              }
+            }
+          }
+
+          // Add selected tokens if specified
+          if (data.startWithSelected) {
+            const selectedTokens = canvas?.tokens?.controlled.map(token => {
+              return {
+              tokenId: token.id,
+              sceneId: token.scene.id
+              };
+            }) ?? [];
+            
+            if (selectedTokens.length > 0) {
+              await combat.createEmbeddedDocuments("Combatant", selectedTokens);
+            }
+          }
+          
+          // Roll initiative for all npc combatants
+          if (data.rollNPC) {
+            await combat.rollNPC();
+          }
+
+          // Roll initiative for all combatants
+          if (data.rollAll) {
+            await combat.rollAll();
+          }
+          
+          // Activate this combat
+          await combat.activate();
+          
+          module.socketManager.send({
+            type: "encounter-started",
+            requestId: data.requestId,
+            encounterId: combat.id,
+            encounter: {
+              id: combat.id,
+              name: combat.name,
+              round: combat.round,
+              turn: combat.turn,
+              combatants: combat.combatants.contents.map(c => ({
+                id: c.id,
+                name: c.name,
+                tokenId: c.token?.id,
+                actorId: c.actor?.id,
+                img: c.img,
+                initiative: c.initiative,
+                hidden: c.hidden,
+                defeated: c.isDefeated
+              }))
+            }
+          });
+        } else {
+          throw new Error("Failed to create encounter");
+        }
+      } catch (error) {
+        ModuleLogger.error(`${moduleId} | Error starting encounter:`, error);
+        module.socketManager.send({
+          type: "encounter-started",
+          requestId: data.requestId,
+          error: (error as Error).message
+        });
+      }
+    });
+
+    // Handle next turn request
+    module.socketManager.onMessageType("encounter-next-turn", async (data) => {
+      ModuleLogger.info(`${moduleId} | Received request for next turn in encounter: ${data.encounterId || 'active'}`);
+      
+      try {
+        const combat = data.encounterId ? (game as Game).combats?.get(data.encounterId) : (game as Game).combat;
+        
+        if (!combat) {
+          throw new Error(data.encounterId ? 
+            `Encounter with ID ${data.encounterId} not found` : 
+            "No active encounter");
+        }
+        
+        await combat.nextTurn();
+        
+        module.socketManager.send({
+          type: "encounter-navigation",
+          requestId: data.requestId,
+          encounterId: combat.id,
+          action: "nextTurn",
+          currentTurn: combat.turn,
+          currentRound: combat.round,
+          encounter: {
+            id: combat.id,
+            name: combat.name,
+            round: combat.round,
+            turn: combat.turn
+          }
+        });
+      } catch (error) {
+        ModuleLogger.error(`${moduleId} | Error advancing to next turn:`, error);
+        module.socketManager.send({
+          type: "encounter-navigation",
+          requestId: data.requestId,
+          error: (error as Error).message
+        });
+      }
+    });
+
+    // Handle next round request
+    module.socketManager.onMessageType("encounter-next-round", async (data) => {
+      ModuleLogger.info(`${moduleId} | Received request for next round in encounter: ${data.encounterId || 'active'}`);
+      
+      try {
+        const combat = data.encounterId ? (game as Game).combats?.get(data.encounterId) : (game as Game).combat;
+        
+        if (!combat) {
+          throw new Error(data.encounterId ? 
+            `Encounter with ID ${data.encounterId} not found` : 
+            "No active encounter");
+        }
+        
+        await combat.nextRound();
+        
+        module.socketManager.send({
+          type: "encounter-navigation",
+          requestId: data.requestId,
+          encounterId: combat.id,
+          action: "nextRound",
+          currentTurn: combat.turn,
+          currentRound: combat.round,
+          encounter: {
+            id: combat.id,
+            name: combat.name,
+            round: combat.round,
+            turn: combat.turn
+          }
+        });
+      } catch (error) {
+        ModuleLogger.error(`${moduleId} | Error advancing to next round:`, error);
+        module.socketManager.send({
+          type: "encounter-navigation",
+          requestId: data.requestId,
+          error: (error as Error).message
+        });
+      }
+    });
+
+    // Handle previous turn request
+    module.socketManager.onMessageType("encounter-previous-turn", async (data) => {
+      ModuleLogger.info(`${moduleId} | Received request for previous turn in encounter: ${data.encounterId || 'active'}`);
+      
+      try {
+        const combat = data.encounterId ? (game as Game).combats?.get(data.encounterId) : (game as Game).combat;
+        
+        if (!combat) {
+          throw new Error(data.encounterId ? 
+            `Encounter with ID ${data.encounterId} not found` : 
+            "No active encounter");
+        }
+        
+        await combat.previousTurn();
+        
+        module.socketManager.send({
+          type: "encounter-navigation",
+          requestId: data.requestId,
+          encounterId: combat.id,
+          action: "previousTurn",
+          currentTurn: combat.turn,
+          currentRound: combat.round,
+          encounter: {
+            id: combat.id,
+            name: combat.name,
+            round: combat.round,
+            turn: combat.turn
+          }
+        });
+      } catch (error) {
+        ModuleLogger.error(`${moduleId} | Error going back to previous turn:`, error);
+        module.socketManager.send({
+          type: "encounter-navigation",
+          requestId: data.requestId,
+          error: (error as Error).message
+        });
+      }
+    });
+
+    // Handle previous round request
+    module.socketManager.onMessageType("encounter-previous-round", async (data) => {
+      ModuleLogger.info(`${moduleId} | Received request for previous round in encounter: ${data.encounterId || 'active'}`);
+      
+      try {
+        const combat = data.encounterId ? (game as Game).combats?.get(data.encounterId) : (game as Game).combat;
+        
+        if (!combat) {
+          throw new Error(data.encounterId ? 
+            `Encounter with ID ${data.encounterId} not found` : 
+            "No active encounter");
+        }
+        
+        await combat.previousRound();
+        
+        module.socketManager.send({
+          type: "encounter-navigation",
+          requestId: data.requestId,
+          encounterId: combat.id,
+          action: "previousRound",
+          currentTurn: combat.turn,
+          currentRound: combat.round,
+          encounter: {
+            id: combat.id,
+            name: combat.name,
+            round: combat.round,
+            turn: combat.turn
+          }
+        });
+      } catch (error) {
+        ModuleLogger.error(`${moduleId} | Error going back to previous round:`, error);
+        module.socketManager.send({
+          type: "encounter-navigation",
+          requestId: data.requestId,
+          error: (error as Error).message
+        });
+      }
+    });
+
+    // Handle end encounter request
+    module.socketManager.onMessageType("end-encounter", async (data) => {
+      ModuleLogger.info(`${moduleId} | Received request to end encounter: ${data.encounterId}`);
+      
+      try {
+        if (!data.encounterId) {
+          throw new Error("Encounter ID is required");
+        }
+        
+        const combat = (game as Game).combats?.get(data.encounterId);
+        
+        if (!combat) {
+          throw new Error(`Encounter with ID ${data.encounterId} not found`);
+        }
+        
+        await combat.delete();
+        
+        module.socketManager.send({
+          type: "encounter-ended",
+          requestId: data.requestId,
+          encounterId: data.encounterId,
+          message: "Encounter successfully ended"
+        });
+      } catch (error) {
+        ModuleLogger.error(`${moduleId} | Error ending encounter:`, error);
+        module.socketManager.send({
+          type: "encounter-ended",
+          requestId: data.requestId,
+          error: (error as Error).message
+        });
+      }
+    });
+
   } catch (error) {
     ModuleLogger.error(`${moduleId} | Error initializing WebSocket:`, error);
   }

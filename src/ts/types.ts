@@ -19,8 +19,8 @@ export interface FoundryRestApi extends Game.ModuleData<any> {
 
 export interface FoundryRestApiAPI {
   getWebSocketManager: () => WebSocketManager;
-  search: (query: string, filter?: string) => Promise<any[]>;  // Add this line
-  getByUuid: (uuid: string) => Promise<any>;  // Add this line
+  search: (query: string, filter?: string) => Promise<any[]>;
+  getByUuid: (uuid: string) => Promise<any>;
 }
 
 export interface WebSocketMessage {

@@ -570,197 +570,331 @@ function initializeWebSocket() {
 
     // Handle roll request
     module.socketManager.onMessageType("perform-roll", async (data) => {
-      ModuleLogger.info(`${moduleId} | Received roll request:`, data);
-      
       try {
-        // Validate the roll formula
-        if (!data.formula) {
-          throw new Error("Roll formula is required");
-        }
+        const { formula, itemUuid, flavor, createChatMessage, speaker, target, whisper, requestId } = data;
         
-        // Create a new Roll instance
-        const roll = new Roll(data.formula);
+        let rollResult;
+        let speakerData = {};
+        let rollMode = whisper && whisper.length > 0 ? CONST.DICE_ROLL_MODES.PRIVATE : CONST.DICE_ROLL_MODES.PUBLIC;
         
-        // Generate a unique rollId for this roll
-        const rollId = `manual_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        
-        // Evaluate the roll using evaluateSync
-        await roll.evaluate();
-        
-        // Create chat message if requested
-        if (data.createChatMessage !== false) {
-          // Process whisper recipients
-          let whisperRecipients = [];
-          
-          if (data.whisper && Array.isArray(data.whisper)) {
-            // Try to get valid user IDs for whisper
-            for (const entry of data.whisper) {
-              // If it's already a valid user ID, use it directly
-              const user = (game as Game).users?.get(entry);
-              if (user) {
-                whisperRecipients.push(entry);
-                continue;
-              }
-              
-              // Try to find by name
-              const userByName = (game as Game).users?.find(u => u.name === entry);
-              if (userByName) {
-                whisperRecipients.push(userByName.id);
-              }
-            }
-          }
-          
-          // Determine speaker
-          let speaker;
-          
-          if (data.speaker) {
-            // If speaker is provided, use it
-            if (typeof data.speaker === 'string') {
-              // First try to find as token ID
-              const activeScene = (game as Game).scenes?.viewed;
-              let token = activeScene?.tokens?.get(data.speaker);
-              
-              // If not found by ID, try to find token by name
-              if (!token) {
-                token = activeScene?.tokens?.find(t => t.name === data.speaker);
-              }
-              
-              if (token) {
-                speaker = ChatMessage.getSpeaker({ token });
-              } else {
-                // If not a token, try as actor ID
-                const actor = (game as Game).actors?.get(data.speaker);
-                if (actor) {
-                  // Look for tokens representing this actor on the current scene
-                  const tokenForActor = activeScene?.tokens?.find(t => {
-                    // Check if this token represents the actor
-                    return t.actor?.id === actor.id;
-                  });
-                  
-                  if (tokenForActor) {
-                    speaker = ChatMessage.getSpeaker({ token: tokenForActor });
+        // Process speaker if provided
+        if (speaker) {
+          try {
+            // Check if it's a token UUID or actor UUID
+            const speakerEntity = await fromUuid(speaker);
+            
+            if (speakerEntity) {
+              if (speakerEntity instanceof TokenDocument) {
+                // It's a token
+                speakerData = {
+                  token: speakerEntity?.id,
+                  actor: speakerEntity?.actor?.id,
+                  scene: speakerEntity?.parent?.id,
+                  alias: speakerEntity?.name || speakerEntity?.actor?.name
+                };
+              } else if (speakerEntity instanceof Actor) {
+                // It's an actor - try to find a token that represents it on the active scene
+                const activeScene = (game as Game).scenes?.active;
+                if (activeScene) {
+                  const tokens = activeScene.tokens?.filter(t => t.actor?.id === speakerEntity.id);
+                  if (tokens && tokens.length > 0) {
+                    // Use the first token found
+                    const token = tokens[0];
+                    speakerData = {
+                      token: token.id,
+                      actor: speakerEntity.id,
+                      scene: activeScene.id,
+                      alias: token.name || speakerEntity.name
+                    };
                   } else {
-                    // No token found, use actor directly
-                    speaker = ChatMessage.getSpeaker({ actor });
-                  }
-                } else {
-                  // Try to find by actor name
-                  const actorByName = (game as Game).actors?.find(a => a.name === data.speaker);
-                  if (actorByName) {
-                    // Look for tokens representing this actor on the current scene
-                    const tokenForNamedActor = activeScene?.tokens?.find(t => {
-                      return t.actor?.id === actorByName.id;
-                    });
-                    
-                    if (tokenForNamedActor) {
-                      speaker = ChatMessage.getSpeaker({ token: tokenForNamedActor });
-                    } else {
-                      // No token found, use actor directly
-                      speaker = ChatMessage.getSpeaker({ actor: actorByName });
-                    }
-                  } else {
-                    // Just set the alias if nothing found
-                    speaker = ChatMessage.getSpeaker();
-                    speaker.alias = data.speaker;
+                    // No token found, just use actor
+                    speakerData = {
+                      actor: speakerEntity.id,
+                      alias: speakerEntity.name
+                    };
                   }
                 }
               }
-            } else {
-              // If it's an object, use it directly
-              speaker = data.speaker;
             }
-          } else {
-            // Default speaker
-            speaker = ChatMessage.getSpeaker();
+          } catch (err) {
+            ModuleLogger.warn(`${moduleId} | Failed to process speaker: ${err}`);
           }
-          
-          const chatData = {
-            user: (game as Game).user?.id,
-            speaker: speaker,
-            flavor: data.flavor || `Rolling ${data.formula}`,
-            rolls: [roll],
-            sound: CONFIG.sounds.dice,
-            whisper: whisperRecipients
-          };
-          
-          // Create chat message
+        }
+        
+        // Process the roll
+        if (itemUuid) {
           try {
-            await ChatMessage.create(chatData);
+            // Get the item document
+            const document = await fromUuid(itemUuid);
+            if (!document) {
+              throw new Error(`Item with UUID ${itemUuid} not found`);
+            }
             
-            // Format roll data for response
-            const rollData = {
-              formula: roll.formula,
+            // Cast to an Item with any to access system-specific properties
+            const item = document as Item & {
+              toChat?: (options?: any) => Promise<any>;
+              displayCard?: (options: any) => Promise<any>;
+              system?: any;
+              type: string;
+            };
+            
+            ModuleLogger.info(`${moduleId} | Creating chat message for item: ${(item as any).name}`);
+            
+            let messageId;
+            let targetAcquired = false;
+            let targetToken = null;
+            
+            // Process target if provided
+            if (target) {
+              try {
+                const targetDocument = await fromUuid(target);
+                
+                if (targetDocument) {
+                  if (targetDocument instanceof TokenDocument) {
+                    // It's a token
+                    targetToken = targetDocument;
+                    targetAcquired = true;
+                    ModuleLogger.info(`${moduleId} | Target token acquired: ${targetDocument.name}`);
+                  } else if (targetDocument instanceof Actor) {
+                    // It's an actor - try to find a token that represents it on the active scene
+                    const activeScene = (game as Game).scenes?.active;
+                    if (activeScene) {
+                      const tokens = activeScene.tokens?.filter(t => t.actor?.id === targetDocument.id);
+                      if (tokens && tokens.length > 0) {
+                        // Use the first token found
+                        targetToken = tokens[0];
+                        targetAcquired = true;
+                        ModuleLogger.info(`${moduleId} | Target token acquired from actor: ${tokens[0].name}`);
+                      }
+                    }
+                  }
+                  
+                  // If we found a token, set it as the target
+                  if (targetAcquired && targetToken) {
+                    // For D&D 5e and similar systems, we need to target the token on the canvas
+                    // This will ensure that systems like Midi-QOL can properly apply effects
+                    if (canvas && canvas.ready) {
+                      // Clear current targets first
+                      if (canvas.tokens) {
+                        (game as Game).user?.targets.forEach(t => t.setTarget(false, { user: (game as Game).user, releaseOthers: false, groupSelection: false }));
+                        (game as Game).user?.targets.clear();
+                        
+                        // Get the actual token object from the canvas
+                        if (targetToken.id) {  // Check that the ID is not null or undefined
+                          const targetObject = canvas.tokens.get(targetToken.id);
+                          if (targetObject) {
+                            // Set as target
+                            targetObject.setTarget(true, { user: (game as Game).user, releaseOthers: true, groupSelection: false });
+                            ModuleLogger.info(`${moduleId} | Token targeted on canvas: ${targetObject.name}`);
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              } catch (err) {
+                ModuleLogger.warn(`${moduleId} | Failed to process target: ${err}`);
+              }
+            }
+            
+            // Different systems have different methods for displaying items in chat
+            if ((item as any).system?.actionType) {
+              // This is a D&D 5e item with an action type - use specific handling for Midi-QOL
+              ModuleLogger.info(`${moduleId} | Using D&D 5e item with action type: ${(item as any).system.actionType}`);
+              
+              // For D&D 5e with Midi-QOL, we need to use the item's use method
+              if ('use' in item && typeof (item as any).use === 'function') {
+                // Create options for item use
+                const useOptions: any = {
+                  configureDialog: false,
+                  createMessage: true,
+                  skipDialog: true,
+                  fastForward: true,
+                  consume: false, // Don't consume limited uses by default
+                  speaker: speakerData,
+                  target: targetToken
+                };
+                
+                // If target was acquired, add it
+                if (targetAcquired && targetToken) {
+                  useOptions.target = targetToken;
+                }
+                
+                // Set up automatic dialog handling before using the item
+                const originalRenderDialog = Dialog.prototype.render;
+                
+                // Override Dialog.prototype.render to add auto-clicking behavior
+                Dialog.prototype.render = function(...args) {
+                  const result = originalRenderDialog.apply(this, args);
+                  
+                  // After the dialog renders, click the default or first button
+                  setTimeout(() => {
+                    if (this.element && this.element.length) {
+                      const defaultButton = this.element.find('.dialog-button.default');
+                      if (defaultButton.length) {
+                        ModuleLogger.info(`${moduleId} | Auto-clicking default button in rendered dialog`);
+                        defaultButton.trigger('click');
+                      } else {
+                        const firstButton = this.element.find('.dialog-button').first();
+                        if (firstButton.length) {
+                          ModuleLogger.info(`${moduleId} | Auto-clicking first button in rendered dialog`);
+                          firstButton.trigger('click');
+                        }
+                      }
+                    }
+                  }, 100);
+                  
+                  return result;
+                };
+                
+                try {
+                  // Use the item which should trigger Midi-QOL if installed
+                  ModuleLogger.info(`${moduleId} | Using item with dialog auto-click enabled: ${(item as any).name}`);
+                  const useResult = await (item as any).use(useOptions);
+                  messageId = useResult?.id || useResult; // Handle different return types
+                  
+                  ModuleLogger.info(`${moduleId} | Item used with use() method, should trigger Midi-QOL: ${(item as any).name}`);
+                } finally {
+                  Dialog.prototype.render = originalRenderDialog;
+                  
+                  ModuleLogger.info(`${moduleId} | Restored original dialog methods after item use`);
+                }
+              } else if ((item as any).displayCard && typeof item.displayCard === 'function') {
+                // Fallback to displayCard if use() not available
+                const cardResult = await item.displayCard({
+                  createMessage: true,
+                  speaker: speakerData,
+                  ...(targetAcquired ? { target: targetToken } : {})
+                });
+                messageId = cardResult?.id;
+              }
+            } else if (typeof item.toChat === 'function') {
+              // Some systems use toChat()
+              const chatOptions = targetAcquired ? { target: targetToken } : {};
+              const chatResult = await item.toChat(chatOptions);
+              messageId = chatResult?.id;
+            } else if (typeof item.displayCard === 'function') {
+              // DnD5e uses displayCard()
+              const cardResult = await item.displayCard({
+                createMessage: true,
+                speaker: speakerData,
+                // If target acquired, add it to the options
+                ...(targetAcquired ? { target: targetToken } : {})
+              });
+              messageId = cardResult?.id;
+            } else {
+              // Fallback: Create a simple chat message with item details
+              const chatData = {
+                user: (game as Game).user?.id,
+                speaker: speakerData,
+                content: `
+                  <div class="item-card">
+                    <div class="item-name">${(item as any).name}</div>
+                    <div class="item-image"><img src="${(item as any).img}" width="50" height="50"/></div>
+                    <div class="item-description">${(item as any).system?.description?.value || ""}</div>
+                    ${targetAcquired ? `<div class="item-target">Target: ${targetToken?.name}</div>` : ""}
+                  </div>
+                `,
+                type: CONST.CHAT_MESSAGE_TYPES.OTHER,
+                flavor: `Item: ${(item as any).name}${targetAcquired ? ` (Target: ${targetToken?.name})` : ""}`
+              };
+              
+              const message = await ChatMessage.create(chatData);
+              messageId = message?.id;
+            }
+            
+            // Format the result
+            rollResult = {
+              id: `item_display_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`,
+              chatMessageCreated: true,
+              itemDisplayed: {
+                uuid: item.uuid,
+                name: item.name,
+                type: item.type,
+                img: item.img
+              },
+              target: targetAcquired ? {
+                uuid: targetToken?.uuid,
+                name: targetToken?.name
+              } : null,
+              messageId: messageId
+            };
+            
+            ModuleLogger.info(`${moduleId} | Item chat message created with ID: ${messageId}`);
+          } catch (err) {
+            ModuleLogger.error(`${moduleId} | Error displaying item in chat: ${err}`);
+            module.socketManager.send({
+              type: "roll-result",
+              requestId: requestId,
+              success: false,
+              error: `Failed to display item in chat: ${(err as Error).message}`
+            });
+            return;
+          }
+        } else {
+          // Roll from formula
+          try {
+            // Create the Roll instance
+            const roll = new Roll(formula);
+            
+            // Evaluate the roll
+            await roll.evaluate();
+            
+            // Create chat message if requested
+            if (createChatMessage) {
+              await roll.toMessage({
+                speaker: speakerData,
+                flavor: flavor || "",
+                rollMode,
+                whisper: whisper || []
+              });
+            }
+            
+            // Format the roll result
+            rollResult = {
+              id: `manual_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`,
+              chatMessageCreated: !!createChatMessage,
+              roll: {
+              formula: formula,
               total: roll.total,
-              isCritical: (roll as any).isCritical || false,
-              isFumble: (roll as any).isFumble || false,
-              dice: roll.dice.map((d: any) => ({
+              isCritical: roll.terms.some(term => (term as DiceTerm).results?.some(result => result.result === (roll.terms[0] as DiceTerm).faces)),
+              isFumble: roll.terms.some(term => (term as DiceTerm).results?.some(result => result.result === 1)),
+              dice: roll.dice.map(d => ({
                 faces: d.faces,
-                results: d.results.map((r: any) => ({
-                  result: r.result,
-                  active: r.active
+                results: d.results.map(r => ({
+                result: r.result,
+                active: r.active
                 }))
               })),
               timestamp: Date.now()
+              }
             };
-            // as the createChatMessage hook will handle adding it to recentRolls
+          } catch (err) {
+            ModuleLogger.error(`${moduleId} | Error rolling formula: ${err}`);
             module.socketManager.send({
               type: "roll-result",
-              requestId: data.requestId,
-              success: true,
-              data: {
-                id: rollId,
-                chatMessageCreated: true,
-                roll: rollData
-              }
+              requestId: requestId,
+              success: false,
+              error: `Failed to roll formula: ${(err as Error).message}`
             });
             return;
-          } catch (chatError) {
-            ModuleLogger.error(`${moduleId} | Error creating chat message with roll property:`, chatError);
           }
         }
         
-        // If we get here, either createChatMessage was false or both attempts to create a chat message failed
-        // Format roll data for response
-        const rollData = {
-          id: rollId,
-          formula: roll.formula,
-          total: roll.total,
-          isCritical: (roll as any).isCritical || false,
-          isFumble: (roll as any).isFumble || false,
-          dice: roll.dice.map((d: any) => ({
-            faces: d.faces,
-            results: d.results.map((r: any) => ({
-              result: r.result,
-              active: r.active
-            }))
-          })),
-          timestamp: Date.now()
-        };
-        
-        // Add to recent rolls if chat message wasn't created
-        if (data.createChatMessage === false) {
-          // Add to recent rolls
-          recentRolls.unshift(rollData);
-          
-          // Trim the array if needed
-          if (recentRolls.length > MAX_ROLLS_STORED) {
-            recentRolls.length = MAX_ROLLS_STORED;
-          }
-        }
-        
+        // Send the result back
         module.socketManager.send({
           type: "roll-result",
-          requestId: data.requestId,
+          requestId: requestId,
           success: true,
-          data: rollData
+          data: rollResult
         });
       } catch (error) {
-        ModuleLogger.error(`${moduleId} | Error performing roll:`, error);
+        ModuleLogger.error(`${moduleId} | Error in roll handler: ${error}`);
         module.socketManager.send({
           type: "roll-result",
           requestId: data.requestId,
           success: false,
-          error: (error as Error).message
+          error: (error as Error).message || "Unknown error occurred during roll"
         });
       }
     });
@@ -1169,8 +1303,8 @@ function initializeWebSocket() {
             combatants: combat.combatants.contents.map(c => ({
               id: c.id,
               name: c.name,
-              tokenId: c.token?.id,
-              actorId: c.actor?.id,
+              tokenUuid: c.token?.uuid,
+              actorUuid: c.actor?.uuid,
               img: c.img,
               initiative: c.initiative,
               hidden: c.hidden,
@@ -1228,6 +1362,8 @@ function initializeWebSocket() {
             }
           }
 
+          let addedTokenIds = new Set();
+
           // Add player combatants if specified
           if (data.startWithPlayers) {
             // Get the current viewed scene
@@ -1241,10 +1377,13 @@ function initializeWebSocket() {
               }) ?? [];
               
               // Create combatants from these tokens
-              const tokenData = playerTokens.map(token => ({
-              tokenId: token.id,
-              sceneId: currentScene.id
-              }));
+              const tokenData = playerTokens.map(token => {
+              addedTokenIds.add(token.id);
+              return {
+                tokenId: token.id,
+                sceneId: currentScene.id
+              };
+              });
               
               if (tokenData.length > 0) {
               await combat.createEmbeddedDocuments("Combatant", tokenData);
@@ -1252,19 +1391,21 @@ function initializeWebSocket() {
             }
           }
 
-          // Add selected tokens if specified
+          // Add selected tokens if specified, but only if they weren't already added
           if (data.startWithSelected) {
-            const selectedTokens = canvas?.tokens?.controlled.map(token => {
+            const selectedTokens = canvas?.tokens?.controlled
+              .filter(token => !addedTokenIds.has(token.id))
+              .map(token => {
               return {
-              tokenId: token.id,
-              sceneId: token.scene.id
+                tokenId: token.id,
+                sceneId: token.scene.id
               };
-            }) ?? [];
+              }) ?? [];
             
             if (selectedTokens.length > 0) {
               await combat.createEmbeddedDocuments("Combatant", selectedTokens);
             }
-          }
+          } 
           
           // Roll initiative for all npc combatants
           if (data.rollNPC) {
@@ -1291,8 +1432,8 @@ function initializeWebSocket() {
               combatants: combat.combatants.contents.map(c => ({
                 id: c.id,
                 name: c.name,
-                tokenId: c.token?.id,
-                actorId: c.actor?.id,
+                tokenUuid: c.token?.uuid,
+                actorUuid: c.actor?.uuid,
                 img: c.img,
                 initiative: c.initiative,
                 hidden: c.hidden,
@@ -1335,6 +1476,8 @@ function initializeWebSocket() {
           action: "nextTurn",
           currentTurn: combat.turn,
           currentRound: combat.round,
+          actorTurn: combat.combatant?.actor?.uuid,
+          tokenTurn: combat.combatant?.token?.uuid,
           encounter: {
             id: combat.id,
             name: combat.name,
@@ -1374,6 +1517,8 @@ function initializeWebSocket() {
           action: "nextRound",
           currentTurn: combat.turn,
           currentRound: combat.round,
+          actorTurn: combat.combatant?.actor?.uuid,
+          tokenTurn: combat.combatant?.token?.uuid,
           encounter: {
             id: combat.id,
             name: combat.name,
@@ -1413,6 +1558,8 @@ function initializeWebSocket() {
           action: "previousTurn",
           currentTurn: combat.turn,
           currentRound: combat.round,
+          actorTurn: combat.combatant?.actor?.uuid,
+          tokenTurn: combat.combatant?.token?.uuid,
           encounter: {
             id: combat.id,
             name: combat.name,
@@ -1452,6 +1599,8 @@ function initializeWebSocket() {
           action: "previousRound",
           currentTurn: combat.turn,
           currentRound: combat.round,
+          actorTurn: combat.combatant?.actor?.uuid,
+          tokenTurn: combat.combatant?.token?.uuid,
           encounter: {
             id: combat.id,
             name: combat.name,

@@ -23,6 +23,5 @@
       "path": "languages/en.json"
     }
   ],
-  "styles": ["style.css"],
   "esmodules": ["scripts/module.js"]
 }

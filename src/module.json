@@ -3,9 +3,15 @@
   "title": "Foundry REST API",
   "description": "Adds rest endpoint to get data from FoundryVTT",
   "version": "1.0.1",
-  "packs": [],
-  "relationships": [],
-  "scripts": [],
+  "authors": [
+      {
+          "name": "ThreeHats",
+          "url": "https://github.com/ThreeHats"
+      }
+  ],
+  "license": "MIT",
+  "url": "https://github.com/ThreeHats/foundryvtt-rest-api",
+  "bugs": "https://github.com/ThreeHats/foundryvtt-rest-api/issues",
   "compatibility": {
     "minimum": "12",
     "verified": "12"

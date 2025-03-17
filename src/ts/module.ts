@@ -173,7 +173,7 @@ function initializeWebSocket() {
     return;
   }
   
-  ModuleLogger.info(`${moduleId} | Initializing WebSocket with URL: ${wsRelayUrl}, api key: ${apiKey}`);
+  ModuleLogger.info(`${moduleId} | Initializing WebSocket with URL: ${wsRelayUrl}`);
   
   try {
     // Create and connect the WebSocket manager

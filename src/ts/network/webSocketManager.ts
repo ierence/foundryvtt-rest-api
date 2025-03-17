@@ -15,15 +15,110 @@ export class WebSocketManager {
   private clientId: string;
   private pingInterval: number | null = null;
   private isConnecting: boolean = false;
+  private isPrimaryGM: boolean = false;
+  
+  // Singleton instance
+  private static instance: WebSocketManager | null = null;
 
   constructor(url: string, token: string) {
     this.url = url;
     this.token = token;
     this.clientId = `foundry-${(game as Game).user?.id || Math.random().toString(36).substring(2, 15)}`;
-    ModuleLogger.info(`${moduleId} | Created WebSocketManager with clientId: ${this.clientId}`);
+    
+    // Determine if this is the primary GM (lowest user ID among GMs)
+    this.isPrimaryGM = this.checkIfPrimaryGM();
+    
+    ModuleLogger.info(`${moduleId} | Created WebSocketManager with clientId: ${this.clientId}, isPrimaryGM: ${this.isPrimaryGM}`);
+    
+    // Listen for user join/leave events to potentially take over as primary
+    if ((game as Game).user?.isGM) {
+      // When another user connects or disconnects, check if we need to become primary
+      Hooks.on("userConnected", this.reevaluatePrimaryGM.bind(this));
+      Hooks.on("userDisconnected", this.reevaluatePrimaryGM.bind(this));
+    }
+  }
+  
+  /**
+   * Factory method that ensures only one instance is created and only for GM users
+   * @param url The WebSocket server URL
+   * @param token The authorization token
+   * @returns WebSocketManager instance or null if not GM
+   */
+  public static getInstance(url: string, token: string): WebSocketManager | null {
+    // Only create an instance if the user is a GM
+    if (!(game as Game).user?.isGM) {
+      ModuleLogger.info(`${moduleId} | WebSocketManager not created - user is not a GM`);
+      return null;
+    }
+    
+    // Only create the instance once
+    if (!WebSocketManager.instance) {
+      ModuleLogger.info(`${moduleId} | Creating new WebSocketManager instance`);
+      WebSocketManager.instance = new WebSocketManager(url, token);
+    }
+    
+    return WebSocketManager.instance;
+  }
+
+  /**
+   * Determines if this GM has the lowest user ID among all active GMs
+   */
+  private checkIfPrimaryGM(): boolean {
+    if (!(game as Game).user?.isGM) return false;
+    
+    const currentUserId = (game as Game).user?.id;
+    const activeGMs = (game as Game).users?.filter(u => u.isGM && u.active) || [];
+    
+    if (activeGMs.length === 0) return false;
+    
+    // Sort by user ID (alphanumeric)
+    const sortedGMs = [...activeGMs].sort((a, b) => (a.id || '').localeCompare(b.id || ''));
+    
+    // Check if current user has the lowest ID
+    const isPrimary = sortedGMs[0]?.id === currentUserId;
+    
+    ModuleLogger.info(`${moduleId} | Primary GM check - Current user: ${currentUserId}, Primary GM: ${sortedGMs[0]?.id}, isPrimary: ${isPrimary}`);
+    
+    return isPrimary;
+  }
+  
+  /**
+   * Re-evaluate if this GM should be the primary when users connect/disconnect
+   */
+  private reevaluatePrimaryGM(): void {
+    const wasPrimary = this.isPrimaryGM;
+    this.isPrimaryGM = this.checkIfPrimaryGM();
+    
+    // If status changed, log it
+    if (wasPrimary !== this.isPrimaryGM) {
+      ModuleLogger.info(`${moduleId} | Primary GM status changed: ${wasPrimary} -> ${this.isPrimaryGM}`);
+      
+      // If we just became primary, connect
+      if (this.isPrimaryGM && !this.isConnected()) {
+        ModuleLogger.info(`${moduleId} | Taking over as primary GM, connecting WebSocket`);
+        this.connect();
+      }
+      
+      // If we're no longer primary, disconnect
+      if (!this.isPrimaryGM && this.isConnected()) {
+        ModuleLogger.info(`${moduleId} | No longer primary GM, disconnecting WebSocket`);
+        this.disconnect();
+      }
+    }
   }
 
   connect(): void {
+    // Double-check that user is still GM and is the primary GM before connecting
+    if (!(game as Game).user?.isGM) {
+      ModuleLogger.info(`${moduleId} | WebSocket connection aborted - user is not a GM`);
+      return;
+    }
+    
+    if (!this.isPrimaryGM) {
+      ModuleLogger.info(`${moduleId} | WebSocket connection aborted - user is not the primary GM`);
+      return;
+    }
+    
     if (this.isConnecting) {
       ModuleLogger.info(`${moduleId} | Already attempting to connect`);
       return;

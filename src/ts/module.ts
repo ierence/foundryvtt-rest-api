@@ -63,17 +63,17 @@ Hooks.once("init", () => {
     getWebSocketManager: () => module.socketManager,
     search: async (query: string, filter?: string) => {
       if (!window.QuickInsert) {
-        ModuleLogger.error(`${moduleId} | QuickInsert not available`);
+        ModuleLogger.error(`QuickInsert not available`);
         return [];
       }
       
       if (!window.QuickInsert.hasIndex) {
-        ModuleLogger.info(`${moduleId} | QuickInsert index not ready, forcing index creation`);
+        ModuleLogger.info(`QuickInsert index not ready, forcing index creation`);
         try {
           window.QuickInsert.forceIndex();
           await new Promise(resolve => setTimeout(resolve, 500));
         } catch (error) {
-          ModuleLogger.error(`${moduleId} | Failed to force QuickInsert index:`, error);
+          ModuleLogger.error(`Failed to force QuickInsert index:`, error);
         }
       }
       
@@ -88,7 +88,7 @@ Hooks.once("init", () => {
       try {
         return await fromUuid(uuid);
       } catch (error) {
-        ModuleLogger.error(`${moduleId} | Error getting entity by UUID:`, error);
+        ModuleLogger.error(`Error getting entity by UUID:`, error);
         return null;
       }
     }
@@ -103,7 +103,7 @@ Hooks.once("ready", () => {
 
 Hooks.on("createChatMessage", (message: any) => {
   if (message.isRoll && message.rolls?.length > 0) {
-    ModuleLogger.info(`${moduleId} | Detected dice roll from ${message.user?.name || 'unknown'}`);
+    ModuleLogger.info(`Detected dice roll from ${message.user?.name || 'unknown'}`);
     
     // Generate a unique ID using the message ID to prevent duplicates
     const rollId = message.id;

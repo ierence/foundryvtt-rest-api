@@ -7,6 +7,8 @@
 - Download [Postman](https://www.postman.com/downloads/) and the import the latest [API Test Collection](https://github.com/ThreeHats/foundryvtt-rest-api-relay/blob/main/Foundry%20REST%20API%20Documentation.postman_collection.json) for an easy way to start testing endpoints.
     
 - Read the [documentation](https://github.com/ThreeHats/foundryvtt-rest-api-relay/wiki) for information about how to use each endpoint
+
+- Join the [discord](https://discord.gg/U634xNGRAC) server for updates, questions, and discussions
     
 
 ---

@@ -95,6 +95,36 @@ Hooks.once("init", () => {
   };
 });
 
+// Replace the API key input field with a password field
+Hooks.on("renderSettingsConfig", (_: SettingsConfig, html: JQuery) => {
+  const apiKeyInput = html.find(`input[name="${moduleId}.apiKey"]`);
+  if (apiKeyInput.length) {
+    // Change the input type to password
+    apiKeyInput.attr("type", "password");
+
+    // Add an event listener to save the value when it changes
+    apiKeyInput.on("change", (event) => {
+      const newValue = (event.target as HTMLInputElement).value;
+      (game as Game).settings.set(moduleId, "apiKey", newValue).then(() => {
+        new Dialog({
+          title: "Reload Required",
+          content: "<p>The API Key has been updated. A reload is required for the changes to take effect. Would you like to reload now?</p>",
+          buttons: {
+            yes: {
+              label: "Reload",
+              callback: () => window.location.reload()
+            },
+            no: {
+              label: "Later"
+            }
+          },
+          default: "yes"
+        }).render(true);
+      });
+    });
+  }
+});
+
 Hooks.once("ready", () => {
   setTimeout(() => {
     initializeWebSocket();

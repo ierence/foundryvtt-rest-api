@@ -2209,9 +2209,115 @@ export function initializeWebSocket() {
             });
         }
     });
+
+    // Handle select entities request
+    module.socketManager.onMessageType("select-entities", async (data) => {
+        ModuleLogger.info(`Received select entities request:`, data);
+        
+        try {
+            const scene = (game as Game).scenes?.active;
+            if (!scene) {
+                throw new Error("No active scene found");
+            }
+
+            if (data.overwrite) {
+                // Deselect all tokens if overwrite is true
+                canvas?.tokens?.releaseAll();
+            }
+
+            let targets: TokenDocument[] = [];
+            if (data.uuids && Array.isArray(data.uuids)) {
+                const matchingTokens = scene.tokens?.filter(token => 
+                    data.uuids.includes(token.uuid)
+                ) || [];
+                targets = [...targets, ...matchingTokens];
+            }
+            if (data.name) {
+                const matchingTokens = scene.tokens?.filter(token => 
+                    token.name?.toLowerCase() === data.name?.toLowerCase()
+                ) || [];
+                targets = [...targets, ...matchingTokens];
+            }
+            if (data.data) {
+                const matchingTokens = scene.tokens?.filter(token => 
+                    Object.entries(data.data).every(([key, value]) => {
+                        // Handle nested keys for actor data
+                        if (key.startsWith("actor.") && token.actor) {
+                            const actorKey = key.replace("actor.", "");
+                            return getProperty(token.actor, actorKey) === value;
+                        }
+                        // Handle token-level properties
+                        const tokenData = token.toObject();
+                        return getProperty(tokenData, key) === value;
+                    })
+                ) || [];
+                targets = [...targets, ...matchingTokens];
+            }
+
+            if (targets.length === 0) {
+                throw new Error("No matching entities found");
+            }
+
+            // Select each token
+            for (const token of targets) {
+                const t = token.id ? canvas?.tokens?.get(token.id) : null;
+                if (t) {
+                    t.control({ releaseOthers: false });
+                }
+            }
+
+            module.socketManager.send({
+                type: "select-entities-result",
+                requestId: data.requestId,
+                success: true,
+                count: targets.length,
+                message: `${targets.length} entities selected`
+            });
+        } catch (error) {
+            ModuleLogger.error(`Error selecting entities:`, error);
+            module.socketManager.send({
+                type: "select-entities-result",
+                requestId: data.requestId,
+                success: false,
+                error: (error as Error).message
+            });
+        }
+    });
+
+    // Handle get selected entities request
+    module.socketManager.onMessageType("get-selected-entities", async (data) => {
+        ModuleLogger.info(`Received get selected entities request:`, data);
+        
+        try {
+            const scene = (game as Game).scenes?.active;
+            if (!scene) {
+                throw new Error("No active scene found");
+            }
+
+            const selectedTokens = canvas?.tokens?.controlled || [];
+            const selectedUuids = selectedTokens.map(token => ({
+                tokenUuid: token.document.uuid,
+                actorUuid: token.actor?.uuid || null
+            }));
+
+            module.socketManager.send({
+                type: "selected-entities-result",
+                requestId: data.requestId,
+                success: true,
+                selected: selectedUuids
+            });
+        } catch (error) {
+            ModuleLogger.error(`Error getting selected entities:`, error);
+            module.socketManager.send({
+                type: "selected-entities-result",
+                requestId: data.requestId,
+                success: false,
+                error: (error as Error).message
+            });
+        }
+    });
   
     } catch (error) {
       ModuleLogger.error(`Error initializing WebSocket:`, error);
     }
 }
-  

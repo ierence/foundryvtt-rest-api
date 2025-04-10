@@ -1958,7 +1958,7 @@ export function initializeWebSocket() {
         
         // Handle decrease attribute request
         module.socketManager.onMessageType("decrease-attribute", async (data) => {
-            ModuleLogger.info(`Received decrease attribute request for UUID: ${data.uuid}, attribute: ${data.attribute}, amount: ${data.amount}`);
+            ModuleLogger.info(`Received decrease attribute request for attribute: ${data.attribute}, amount: ${data.amount}`);
             
             try {
             if (!data.uuid && !data.selected) {
@@ -1967,36 +1967,55 @@ export function initializeWebSocket() {
             if (!data.attribute) throw new Error("Attribute path is required");
             if (typeof data.amount !== 'number') throw new Error("Amount must be a number");
             
-            // Get the entity
+            const entities = [];
             if (data.selected) {
-                data.uuid = canvas?.tokens?.controlled[0]?.actor?.uuid;
+                const controlledTokens = canvas?.tokens?.controlled || [];
+                for (const token of controlledTokens) {
+                if (token.actor) {
+                    entities.push(token.actor);
+                }
+                }
+            } else if (data.uuid) {
+                const entity = await fromUuid(data.uuid);
+                if (entity) {
+                entities.push(entity);
+                }
             }
-            const entity = await fromUuid(data.uuid);
-            if (!entity) throw new Error(`Entity not found: ${data.uuid}`);
-            
-            // Get current value
-            const currentValue = getProperty(entity, data.attribute);
-            if (typeof currentValue !== 'number') {
+
+            if (entities.length === 0) {
+                throw new Error("No entities found to modify");
+            }
+
+            const results = [];
+            for (const entity of entities) {
+                // Get current value
+                const currentValue = getProperty(entity, data.attribute);
+                if (typeof currentValue !== 'number') {
                 throw new Error(`Attribute ${data.attribute} is not a number, found: ${typeof currentValue}`);
+                }
+
+                // Calculate new value
+                const newValue = currentValue - data.amount;
+
+                // Prepare update data
+                const updateData: { [key: string]: number } = {};
+                updateData[data.attribute] = newValue;
+
+                // Apply the update
+                await entity.update(updateData);
+
+                results.push({
+                uuid: (entity as any).uuid,
+                attribute: data.attribute,
+                oldValue: currentValue,
+                newValue: newValue
+                });
             }
-            
-            // Calculate new value
-            const newValue = currentValue - data.amount;
-            
-            // Prepare update data
-            const updateData: { [key: string]: number } = {};
-            updateData[data.attribute] = newValue;
-            
-            // Apply the update
-            await entity.update(updateData);
-            
+
             module.socketManager.send({
                 type: "modify-attribute-result",
                 requestId: data.requestId,
-                uuid: data.uuid,
-                attribute: data.attribute,
-                oldValue: currentValue,
-                newValue: newValue,
+                results,
                 success: true
             });
             } catch (error) {
@@ -2004,8 +2023,6 @@ export function initializeWebSocket() {
             module.socketManager.send({
                 type: "modify-attribute-result",
                 requestId: data.requestId,
-                uuid: data.uuid || "",
-                attribute: data.attribute || "",
                 success: false,
                 error: (error as Error).message
             });
@@ -2014,7 +2031,7 @@ export function initializeWebSocket() {
         
         // Handle increase attribute request
         module.socketManager.onMessageType("increase-attribute", async (data) => {
-            ModuleLogger.info(`Received increase attribute request for UUID: ${data.uuid}, attribute: ${data.attribute}, amount: ${data.amount}`);
+            ModuleLogger.info(`Received increase attribute request for attribute: ${data.attribute}, amount: ${data.amount}`);
             
             try {
             if (!data.uuid && !data.selected) {
@@ -2023,36 +2040,55 @@ export function initializeWebSocket() {
             if (!data.attribute) throw new Error("Attribute path is required");
             if (typeof data.amount !== 'number') throw new Error("Amount must be a number");
             
-            // Get the entity
+            const entities = [];
             if (data.selected) {
-                data.uuid = canvas?.tokens?.controlled[0]?.actor?.uuid;
+                const controlledTokens = canvas?.tokens?.controlled || [];
+                for (const token of controlledTokens) {
+                if (token.actor) {
+                    entities.push(token.actor);
+                }
+                }
+            } else if (data.uuid) {
+                const entity = await fromUuid(data.uuid);
+                if (entity) {
+                entities.push(entity);
+                }
             }
-            const entity = await fromUuid(data.uuid);
-            if (!entity) throw new Error(`Entity not found: ${data.uuid}`);
-            
-            // Get current value
-            const currentValue = getProperty(entity, data.attribute);
-            if (typeof currentValue !== 'number') {
+
+            if (entities.length === 0) {
+                throw new Error("No entities found to modify");
+            }
+
+            const results = [];
+            for (const entity of entities) {
+                // Get current value
+                const currentValue = getProperty(entity, data.attribute);
+                if (typeof currentValue !== 'number') {
                 throw new Error(`Attribute ${data.attribute} is not a number, found: ${typeof currentValue}`);
+                }
+
+                // Calculate new value
+                const newValue = currentValue + data.amount;
+
+                // Prepare update data
+                const updateData: { [key: string]: unknown } = {};
+                updateData[data.attribute] = newValue;
+
+                // Apply the update
+                await entity.update(updateData);
+
+                results.push({
+                uuid: (entity as any).uuid,
+                attribute: data.attribute,
+                oldValue: currentValue,
+                newValue: newValue
+                });
             }
-            
-            // Calculate new value
-            const newValue = currentValue + data.amount;
-            
-            // Prepare update data
-            const updateData: { [key: string]: unknown } = {};
-            updateData[data.attribute] = newValue;
-            
-            // Apply the update
-            await entity.update(updateData);
-            
+
             module.socketManager.send({
                 type: "modify-attribute-result",
                 requestId: data.requestId,
-                uuid: data.uuid,
-                attribute: data.attribute,
-                oldValue: currentValue,
-                newValue: newValue,
+                results,
                 success: true
             });
             } catch (error) {
@@ -2060,8 +2096,6 @@ export function initializeWebSocket() {
             module.socketManager.send({
                 type: "modify-attribute-result",
                 requestId: data.requestId,
-                uuid: data.uuid || "",
-                attribute: data.attribute || "",
                 success: false,
                 error: (error as Error).message
             });

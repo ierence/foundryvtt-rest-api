@@ -1794,165 +1794,174 @@ export function initializeWebSocket() {
             ModuleLogger.info(`Received kill request for UUID: ${data.uuid}`);
             
             try {
-                if (!data.uuid) {
-                    if (data.selected) {
-                        data.uuid = canvas?.tokens?.controlled[0]?.document?.uuid;
-                    } else {
-                        throw new Error("UUID or selected is required");
-                    }
-                }
-                
-                // Get the entity
+            const entities = [];
+
+            if (data.uuid) {
                 const entity = await fromUuid(data.uuid);
-                
-                if (!entity) {
-                    throw new Error(`Entity not found: ${data.uuid}`);
+                if (entity) {
+                entities.push(entity);
+                } else {
+                throw new Error(`Entity not found: ${data.uuid}`);
                 }
-                
+            } else if (data.selected) {
+                const controlledTokens = canvas?.tokens?.controlled || [];
+                for (const token of controlledTokens) {
+                if (token.document) {
+                    entities.push(token.document);
+                }
+                }
+            }
+
+            if (entities.length === 0) {
+                throw new Error("No entities found to mark as defeated");
+            }
+
+            const results = [];
+
+            for (const entity of entities) {
                 let success = false;
                 let message = "";
-                
+
                 // Handle different entity types
                 if (entity.documentName === "Token") {
-                    const token = entity;
-                    // Use token.actor directly instead of game.actors.get()
-                    const actor = (token as any).actor;
+                const token = entity;
+                const actor = (token as any).actor;
+
+                if (!actor) {
+                    throw new Error("Token has no associated actor");
+                }
+
+                // 1. Mark as defeated in combat if in encounter
+                const combat = (game as Game).combat;
+                if (combat) {
+                    const combatant = combat.combatants.find(c => 
+                    c.token?.id === token.id && c.token?.parent?.id === token.parent?.id
+                    );
                     
-                    if (!actor) {
-                        throw new Error("Token has no associated actor");
+                    if (combatant) {
+                    await combatant.update({ defeated: true });
+                    ModuleLogger.info(`Marked token as defeated in combat`);
                     }
-                    
-                    // 1. Mark as defeated in combat if in encounter
-                    const combat = (game as Game).combat;
-                    if (combat) {
-                        const combatant = combat.combatants.find(c => 
-                            c.token?.id === token.id && c.token?.parent?.id === token.parent?.id
-                        );
-                        
-                        if (combatant) {
-                            await combatant.update({ defeated: true });
-                            ModuleLogger.info(`Marked token as defeated in combat`);
-                        }
+                }
+
+                // 2. Reduce HP to 0 - try different possible HP paths for different systems
+                try {
+                    if (hasProperty(actor, "system.attributes.hp")) {
+                    await actor.update({ "system.attributes.hp.value": 0 });
+                    } 
+                    else if (hasProperty(actor, "system.health")) {
+                    await actor.update({ "system.health.value": 0 });
                     }
+                    else if (hasProperty(actor, "system.hp")) {
+                    await actor.update({ "system.hp.value": 0 });
+                    }
+                    else if (hasProperty(actor, "data.attributes.hp")) {
+                    await actor.update({ "data.attributes.hp.value": 0 });
+                    }
+                    ModuleLogger.info(`Set actor HP to 0`);
+                } catch (err) {
+                    ModuleLogger.warn(`Could not set HP to 0: ${err}`);
+                }
+
+                // 3. Add dead status effect to token
+                try {
+                    const deadEffect = CONFIG.statusEffects?.find(e => 
+                    e.id === "dead" || e.id === "unconscious" || e.id === "defeated"
+                    );
                     
-                    // 2. Reduce HP to 0 - try different possible HP paths for different systems
+                    if (deadEffect) {
+                    await (token as any).toggleActiveEffect(deadEffect);
+                    ModuleLogger.info(`Added ${deadEffect.id} status effect to token`);
+                    } else {
+                    ModuleLogger.warn(`No dead status effect found`);
+                    }
+                } catch (err) {
+                    ModuleLogger.warn(`Could not apply status effect: ${err}`);
+                }
+
+                success = true;
+                message = "Token marked as defeated, HP set to 0, and dead effect applied";
+                } else if (entity.documentName === "Actor") {
+                const actor = entity;
+                let tokensUpdated = 0;
+
+                // 1. Find all tokens for this actor across visible scenes and update them
+                const scenes = (game as Game).scenes;
+                if (scenes?.viewed) {
+                    const tokens = scenes.viewed.tokens.filter(t => t.actor?.id === actor.id);
+                    
+                    for (const token of tokens) {
                     try {
-                        // Try multiple system paths for HP
-                        if (hasProperty(actor, "system.attributes.hp")) {
-                            await actor.update({ "system.attributes.hp.value": 0 });
-                        } 
-                        else if (hasProperty(actor, "system.health")) {
-                            await actor.update({ "system.health.value": 0 });
-                        }
-                        else if (hasProperty(actor, "system.hp")) {
-                            await actor.update({ "system.hp.value": 0 });
-                        }
-                        else if (hasProperty(actor, "data.attributes.hp")) {
-                            await actor.update({ "data.attributes.hp.value": 0 });
-                        }
-                        ModuleLogger.info(`Set actor HP to 0`);
-                    } catch (err) {
-                        ModuleLogger.warn(`Could not set HP to 0: ${err}`);
-                    }
-                    
-                    // 3. Add dead status effect to token
-                    try {
-                        // Try finding an appropriate status effect
                         const deadEffect = CONFIG.statusEffects?.find(e => 
-                            e.id === "dead" || e.id === "unconscious" || e.id === "defeated"
+                        e.id === "dead" || e.id === "unconscious" || e.id === "defeated"
                         );
                         
                         if (deadEffect) {
-                            await (token as any).toggleActiveEffect(deadEffect);
-                            ModuleLogger.info(`Added ${deadEffect.id} status effect to token`);
-                        } else {
-                            ModuleLogger.warn(`No dead status effect found`);
+                        await (token as any).toggleActiveEffect(deadEffect);
+                        tokensUpdated++;
                         }
                     } catch (err) {
-                        ModuleLogger.warn(`Could not apply status effect: ${err}`);
+                        ModuleLogger.warn(`Could not apply status effect to token: ${err}`);
                     }
-                    
-                    success = true;
-                    message = "Token marked as defeated, HP set to 0, and dead effect applied";
-                } else if (entity.documentName === "Actor") {
-                    const actor = entity;
-                    let tokensUpdated = 0;
-                    
-                    // 1. Find all tokens for this actor across visible scenes and update them
-                    const scenes = (game as Game).scenes;
-                    if (scenes?.viewed) {
-                        const tokens = scenes.viewed.tokens.filter(t => t.actor?.id === actor.id);
-                        
-                        for (const token of tokens) {
-                            try {
-                                // Try finding an appropriate status effect
-                                const deadEffect = CONFIG.statusEffects?.find(e => 
-                                    e.id === "dead" || e.id === "unconscious" || e.id === "defeated"
-                                );
-                                
-                                if (deadEffect) {
-                                    await (token as any).toggleActiveEffect(deadEffect);
-                                    tokensUpdated++;
-                                }
-                            } catch (err) {
-                                ModuleLogger.warn(`Could not apply status effect to token: ${err}`);
-                            }
-                        }
                     }
-                    
-                    // 2. Mark all instances in combat as defeated
-                    const combat = (game as Game).combat;
-                    if (combat) {
-                        const combatants = combat.combatants.filter(c => c.actor?.id === actor.id);
-                        
-                        if (combatants.length > 0) {
-                            await Promise.all(combatants.map(c => c.update({ defeated: true })));
-                            ModuleLogger.info(`Marked ${combatants.length} combatants as defeated`);
-                        }
-                    }
-        
-                    // 3. Reduce HP to 0 - try different possible HP paths for different systems
-                    try {
-                        // Try multiple system paths for HP
-                        if (hasProperty(actor, "system.attributes.hp")) {
-                            await actor.update({ "system.attributes.hp.value": 0 });
-                        } 
-                        else if (hasProperty(actor, "system.health")) {
-                            await actor.update({ "system.health.value": 0 });
-                        }
-                        else if (hasProperty(actor, "system.hp")) {
-                            await actor.update({ "system.hp.value": 0 });
-                        }
-                        else if (hasProperty(actor, "data.attributes.hp")) {
-                            await actor.update({ "data.attributes.hp.value": 0 });
-                        }
-                        ModuleLogger.info(`Set actor HP to 0`);
-                    } catch (err) {
-                        ModuleLogger.warn(`Could not set HP to 0: ${err}`);
-                    }
-                    
-                    success = true;
-                    message = `Actor marked as defeated, HP set to 0, and dead effect applied to ${tokensUpdated} tokens`;
-                } else {
-                    throw new Error(`Cannot mark entity type ${entity.documentName} as defeated`);
                 }
-                
-                module.socketManager.send({
-                    type: "kill-entity-result",
-                    requestId: data.requestId,
-                    uuid: data.uuid,
-                    success,
-                    message
+
+                // 2. Mark all instances in combat as defeated
+                const combat = (game as Game).combat;
+                if (combat) {
+                    const combatants = combat.combatants.filter(c => c.actor?.id === actor.id);
+                    
+                    if (combatants.length > 0) {
+                    await Promise.all(combatants.map(c => c.update({ defeated: true })));
+                    ModuleLogger.info(`Marked ${combatants.length} combatants as defeated`);
+                    }
+                }
+
+                // 3. Reduce HP to 0 - try different possible HP paths for different systems
+                try {
+                    if (hasProperty(actor, "system.attributes.hp")) {
+                    await actor.update({ "system.attributes.hp.value": 0 });
+                    } 
+                    else if (hasProperty(actor, "system.health")) {
+                    await actor.update({ "system.health.value": 0 });
+                    }
+                    else if (hasProperty(actor, "system.hp")) {
+                    await actor.update({ "system.hp.value": 0 });
+                    }
+                    else if (hasProperty(actor, "data.attributes.hp")) {
+                    await actor.update({ "data.attributes.hp.value": 0 });
+                    }
+                    ModuleLogger.info(`Set actor HP to 0`);
+                } catch (err) {
+                    ModuleLogger.warn(`Could not set HP to 0: ${err}`);
+                }
+
+                success = true;
+                message = `Actor marked as defeated, HP set to 0, and dead effect applied to ${tokensUpdated} tokens`;
+                } else {
+                throw new Error(`Cannot mark entity type ${entity.documentName} as defeated`);
+                }
+
+                results.push({
+                uuid: (entity as any).uuid,
+                success,
+                message
                 });
+            }
+
+            module.socketManager.send({
+                type: "kill-entity-result",
+                requestId: data.requestId,
+                results
+            });
             } catch (error) {
-                ModuleLogger.error(`Error marking entity as defeated:`, error);
-                module.socketManager.send({
-                    type: "kill-entity-result",
-                    requestId: data.requestId,
-                    uuid: data.uuid || "",
-                    success: false,
-                    error: (error as Error).message
-                });
+            ModuleLogger.error(`Error marking entities as defeated:`, error);
+            module.socketManager.send({
+                type: "kill-entity-result",
+                requestId: data.requestId,
+                success: false,
+                error: (error as Error).message
+            });
             }
         });
         

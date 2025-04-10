@@ -2269,6 +2269,10 @@ export function initializeWebSocket() {
             }
 
             let targets: TokenDocument[] = [];
+            if (data.all) {
+                // Select all tokens on the active scene
+                targets = scene.tokens?.contents || [];
+            }
             if (data.uuids && Array.isArray(data.uuids)) {
                 const matchingTokens = scene.tokens?.filter(token => 
                     data.uuids.includes(token.uuid)

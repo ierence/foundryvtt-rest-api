@@ -60,7 +60,13 @@ Hooks.once("init", () => {
   // Create and expose module API
   const module = (game as Game).modules.get(moduleId) as FoundryRestApi;
   module.api = {
-    getWebSocketManager: () => module.socketManager,
+    getWebSocketManager: () => {
+      if (!module.socketManager) {
+        ModuleLogger.warn(`WebSocketManager requested but not initialized`);
+        return null;
+      }
+      return module.socketManager;
+    },
     search: async (query: string, filter?: string) => {
       if (!window.QuickInsert) {
         ModuleLogger.error(`QuickInsert not available`);

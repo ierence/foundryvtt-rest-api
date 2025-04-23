@@ -18,28 +18,43 @@ export function initializeWebSocket() {
     ModuleLogger.info(`Initializing WebSocket with URL: ${wsRelayUrl}`);
     
     try {
-        // Create and connect the WebSocket manager
-        module.socketManager = new WebSocketManager(wsRelayUrl, apiKey);
-        module.socketManager.connect();
+        // Create and connect the WebSocket manager - only if it doesn't exist already
+        if (!module.socketManager) {
+            module.socketManager = WebSocketManager.getInstance(wsRelayUrl, apiKey);
+            // Only attempt to connect if we got a valid instance (meaning this GM is the primary GM)
+            if (module.socketManager) {
+                module.socketManager.connect();
+            }
+        } else {
+            ModuleLogger.info(`WebSocket manager already exists, not creating a new one`);
+        }
+        
+        // If we don't have a valid socket manager, exit early
+        if (!module.socketManager) {
+            ModuleLogger.warn(`No WebSocket manager available, skipping message handler setup`);
+            return;
+        }
         
         // Register message handlers
-        module.socketManager.onMessageType("ping", () => {
+        const socketManager = module.socketManager; // Store reference to prevent null checks on every line
+        
+        socketManager.onMessageType("ping", () => {
             ModuleLogger.info(`Received ping, sending pong`);
-            module.socketManager.send({ type: "pong" });
+            socketManager.send({ type: "pong" });
         });
     
-        module.socketManager.onMessageType("pong", () => {
+        socketManager.onMessageType("pong", () => {
             ModuleLogger.info(`Received pong`);
         });
         
         // Handle search requests
-        module.socketManager.onMessageType("perform-search", async (data) => {
+        socketManager.onMessageType("perform-search", async (data) => {
             ModuleLogger.info(`Received search request:`, data);
             
             try {
             if (!window.QuickInsert) {
                 ModuleLogger.error(`QuickInsert not available`);
-                module.socketManager.send({
+                socketManager.send({
                 type: "search-results",
                 requestId: data.requestId,
                 query: data.query,
@@ -56,7 +71,7 @@ export function initializeWebSocket() {
                 await new Promise(resolve => setTimeout(resolve, 500));
                 } catch (error) {
                 ModuleLogger.error(`Failed to force QuickInsert index:`, error);
-                module.socketManager.send({
+                socketManager.send({
                     type: "search-results",
                     requestId: data.requestId,
                     query: data.query,
@@ -80,7 +95,7 @@ export function initializeWebSocket() {
             const filteredResults = await window.QuickInsert.search(data.query, filterFunc, 200);
             ModuleLogger.info(`Search returned ${filteredResults.length} results`);
             
-            module.socketManager.send({
+            socketManager.send({
                 type: "search-results",
                 requestId: data.requestId,
                 query: data.query,
@@ -107,7 +122,7 @@ export function initializeWebSocket() {
             });
             } catch (error) {
             ModuleLogger.error(`Error performing search:`, error);
-            module.socketManager.send({
+            socketManager.send({
                 type: "search-results",
                 requestId: data.requestId,
                 query: data.query,
@@ -118,7 +133,7 @@ export function initializeWebSocket() {
         });
         
         // Handle entity requests
-        module.socketManager.onMessageType("get-entity", async (data) => {
+        socketManager.onMessageType("get-entity", async (data) => {
             ModuleLogger.info(`Received entity request:`, data);
             
             try {
@@ -147,7 +162,7 @@ export function initializeWebSocket() {
                 
                 if (!entityData) {
                     ModuleLogger.error(`Entity not found: ${data.uuid}`);
-                    module.socketManager.send({
+                    socketManager.send({
                     type: "entity-data",
                     requestId: data.requestId,
                     uuid: data.uuid,
@@ -159,7 +174,7 @@ export function initializeWebSocket() {
                 
                 ModuleLogger.info(`Sending entity data for: ${data.uuid}`, entityData);
                 
-                module.socketManager.send({
+                socketManager.send({
                     type: "entity-data",
                     requestId: data.requestId,
                     uuid: entityUUID,
@@ -167,7 +182,7 @@ export function initializeWebSocket() {
                 });
             } catch (error) {
                 ModuleLogger.error(`Error getting entity:`, error);
-                module.socketManager.send({
+                socketManager.send({
                     type: "entity-data",
                     requestId: data.requestId,
                     uuid: data.uuid,
@@ -178,7 +193,7 @@ export function initializeWebSocket() {
         });
     
         // Handle structure request
-        module.socketManager.onMessageType("get-structure", async (data) => {
+        socketManager.onMessageType("get-structure", async (data) => {
             ModuleLogger.info(`Received structure request`);
             
             try {
@@ -208,7 +223,7 @@ export function initializeWebSocket() {
                 };
             });
             
-            module.socketManager.send({
+            socketManager.send({
                 type: "structure-data",
                 requestId: data.requestId,
                 folders,
@@ -216,7 +231,7 @@ export function initializeWebSocket() {
             });
             } catch (error) {
             ModuleLogger.error(`Error getting structure:`, error);
-            module.socketManager.send({
+            socketManager.send({
                 type: "structure-data",
                 requestId: data.requestId,
                 error: (error as Error).message,
@@ -227,7 +242,7 @@ export function initializeWebSocket() {
         });
         
         // Handle contents request
-        module.socketManager.onMessageType("get-contents", async (data) => {
+        socketManager.onMessageType("get-contents", async (data) => {
             ModuleLogger.info(`Received contents request for path: ${data.path}`);
             
             try {
@@ -280,7 +295,7 @@ export function initializeWebSocket() {
                 });
             }
             
-            module.socketManager.send({
+            socketManager.send({
                 type: "contents-data",
                 requestId: data.requestId,
                 path: data.path,
@@ -288,7 +303,7 @@ export function initializeWebSocket() {
             });
             } catch (error) {
             ModuleLogger.error(`Error getting contents:`, error);
-            module.socketManager.send({
+            socketManager.send({
                 type: "contents-data",
                 requestId: data.requestId,
                 path: data.path,
@@ -299,7 +314,7 @@ export function initializeWebSocket() {
         });
         
         // Handle entity creation
-        module.socketManager.onMessageType("create-entity", async (data) => {
+        socketManager.onMessageType("create-entity", async (data) => {
             ModuleLogger.info(`Received create entity request for type: ${data.entityType}`);
             
             try {
@@ -322,7 +337,7 @@ export function initializeWebSocket() {
                 throw new Error("Failed to create entity");
             }
             
-            module.socketManager.send({
+            socketManager.send({
                 type: "entity-created",
                 requestId: data.requestId,
                 uuid: entity.uuid,
@@ -330,7 +345,7 @@ export function initializeWebSocket() {
             });
             } catch (error) {
             ModuleLogger.error(`Error creating entity:`, error);
-            module.socketManager.send({
+            socketManager.send({
                 type: "entity-created",
                 requestId: data.requestId,
                 error: (error as Error).message,
@@ -340,7 +355,7 @@ export function initializeWebSocket() {
         });
         
         // Handle entity update
-        module.socketManager.onMessageType("update-entity", async (data) => {
+        socketManager.onMessageType("update-entity", async (data) => {
             ModuleLogger.info(`Received update entity request for UUID: ${data.uuid}`);
             
             try {
@@ -376,7 +391,7 @@ export function initializeWebSocket() {
                 updatedEntities.push(await fromUuid((entity as any).uuid));
             }
             
-            module.socketManager.send({
+            socketManager.send({
                 type: "entity-updated",
                 requestId: data.requestId,
                 uuid: data.uuid,
@@ -384,7 +399,7 @@ export function initializeWebSocket() {
             });
             } catch (error) {
             ModuleLogger.error(`Error updating entity:`, error);
-            module.socketManager.send({
+            socketManager.send({
                 type: "entity-updated",
                 requestId: data.requestId,
                 uuid: data.uuid,
@@ -395,7 +410,7 @@ export function initializeWebSocket() {
         });
         
         // Handle entity deletion
-        module.socketManager.onMessageType("delete-entity", async (data) => {
+        socketManager.onMessageType("delete-entity", async (data) => {
             ModuleLogger.info(`Received delete entity request for UUID: ${data.uuid}`);
             
             try {
@@ -425,7 +440,7 @@ export function initializeWebSocket() {
                 await entity?.delete();
             }
             
-            module.socketManager.send({
+            socketManager.send({
                 type: "entity-deleted",
                 requestId: data.requestId,
                 uuid: data.uuid,
@@ -433,7 +448,7 @@ export function initializeWebSocket() {
             });
             } catch (error) {
             ModuleLogger.error(`Error deleting entity:`, error);
-            module.socketManager.send({
+            socketManager.send({
                 type: "entity-deleted",
                 requestId: data.requestId,
                 uuid: data.uuid,
@@ -444,10 +459,10 @@ export function initializeWebSocket() {
         });
     
         // Handle roll data request (get list of rolls)
-        module.socketManager.onMessageType("get-rolls", async (data) => {
+        socketManager.onMessageType("get-rolls", async (data) => {
             ModuleLogger.info(`Received request for roll data`);
             
-            module.socketManager.send({
+            socketManager.send({
             type: "rolls-data",
             requestId: data.requestId,
             data: recentRolls.slice(0, data.limit || 20)
@@ -455,10 +470,10 @@ export function initializeWebSocket() {
         });
     
         // Handle last roll request
-        module.socketManager.onMessageType("get-last-roll", (data) => {
+        socketManager.onMessageType("get-last-roll", (data) => {
             ModuleLogger.info(`Received request for last roll data`);
             
-            module.socketManager.send({
+            socketManager.send({
             type: "last-roll-data",
             requestId: data.requestId,
             data: recentRolls.length > 0 ? recentRolls[0] : null
@@ -466,7 +481,7 @@ export function initializeWebSocket() {
         });
     
         // Handle roll request
-        module.socketManager.onMessageType("perform-roll", async (data) => {
+        socketManager.onMessageType("perform-roll", async (data) => {
             try {
             const { formula, itemUuid, flavor, createChatMessage, speaker, target, whisper, requestId } = data;
             
@@ -717,7 +732,7 @@ export function initializeWebSocket() {
                 ModuleLogger.info(`Item chat message created with ID: ${messageId}`);
                 } catch (err) {
                 ModuleLogger.error(`Error displaying item in chat: ${err}`);
-                module.socketManager.send({
+                socketManager.send({
                     type: "roll-result",
                     requestId: requestId,
                     success: false,
@@ -765,7 +780,7 @@ export function initializeWebSocket() {
                 };
                 } catch (err) {
                 ModuleLogger.error(`Error rolling formula: ${err}`);
-                module.socketManager.send({
+                socketManager.send({
                     type: "roll-result",
                     requestId: requestId,
                     success: false,
@@ -776,7 +791,7 @@ export function initializeWebSocket() {
             }
             
             // Send the result back
-            module.socketManager.send({
+            socketManager.send({
                 type: "roll-result",
                 requestId: requestId,
                 success: true,
@@ -784,7 +799,7 @@ export function initializeWebSocket() {
             });
             } catch (error) {
             ModuleLogger.error(`Error in roll handler: ${error}`);
-            module.socketManager.send({
+            socketManager.send({
                 type: "roll-result",
                 requestId: data.requestId,
                 success: false,
@@ -794,7 +809,7 @@ export function initializeWebSocket() {
         });
     
         // Handle actor (or entity) sheet HTML request
-        module.socketManager.onMessageType("get-sheet-html", async (data) => {
+        socketManager.onMessageType("get-sheet-html", async (data) => {
             ModuleLogger.info(`Received sheet HTML request for UUID: ${data.uuid}`);
             
             try {
@@ -815,7 +830,7 @@ export function initializeWebSocket() {
             }
             if (!actor) {
                 ModuleLogger.error(`Entity not found for UUID: ${data.uuid}`);
-                module.socketManager.send({
+                socketManager.send({
                 type: "actor-sheet-html-response",
                 requestId: data.requestId,
                 data: { error: "Entity not found", uuid: data.uuid }
@@ -1076,7 +1091,7 @@ export function initializeWebSocket() {
                 sheet.close();
                 
                 // Send the HTML and CSS back
-                module.socketManager.send({
+                socketManager.send({
                     type: "actor-sheet-html-response",
                     requestId: data.requestId,
                     data: { html, css, uuid: data.uuid }
@@ -1087,7 +1102,7 @@ export function initializeWebSocket() {
                 ModuleLogger.debug(`HTML length: ${html.length}, CSS length: ${css.length}`);
                 } catch (renderError) {
                 ModuleLogger.error(`Error capturing actor sheet HTML:`, renderError);
-                module.socketManager.send({
+                socketManager.send({
                     type: "actor-sheet-html-response",
                     requestId: data.requestId,
                     data: { error: "Failed to capture actor sheet HTML", uuid: data.uuid }
@@ -1102,7 +1117,7 @@ export function initializeWebSocket() {
             
             } catch (error) {
             ModuleLogger.error(`Error rendering actor sheet:`, error);
-            module.socketManager.send({
+            socketManager.send({
                 type: "actor-sheet-html-response",
                 requestId: data.requestId,
                 data: { error: "Failed to render actor sheet", uuid: data.uuid }
@@ -1111,7 +1126,7 @@ export function initializeWebSocket() {
         });
     
         // Handle get macros request
-        module.socketManager.onMessageType("get-macros", async (data) => {
+        socketManager.onMessageType("get-macros", async (data) => {
             ModuleLogger.info(`Received request for macros`);
             
             try {
@@ -1130,14 +1145,14 @@ export function initializeWebSocket() {
                 };
             }) || [];
     
-            module.socketManager.send({
+            socketManager.send({
                 type: "macros-list",
                 requestId: data.requestId,
                 macros
             });
             } catch (error) {
             ModuleLogger.error(`Error getting macros list:`, error);
-            module.socketManager.send({
+            socketManager.send({
                 type: "macros-list",
                 requestId: data.requestId,
                 error: (error as Error).message,
@@ -1147,7 +1162,7 @@ export function initializeWebSocket() {
         });
     
         // Handle execute macro request
-        module.socketManager.onMessageType("execute-macro", async (data) => {
+        socketManager.onMessageType("execute-macro", async (data) => {
             ModuleLogger.info(`Received request to execute macro: ${data.uuid}`);
             
             try {
@@ -1184,7 +1199,7 @@ export function initializeWebSocket() {
             }
             
             // Return success
-            module.socketManager.send({
+            socketManager.send({
                 type: "macro-execution-result",
                 requestId: data.requestId,
                 uuid: data.uuid,
@@ -1193,7 +1208,7 @@ export function initializeWebSocket() {
             });
             } catch (error) {
             ModuleLogger.error(`Error executing macro:`, error);
-            module.socketManager.send({
+            socketManager.send({
                 type: "macro-execution-result",
                 requestId: data.requestId,
                 uuid: data.uuid || "",
@@ -1204,7 +1219,7 @@ export function initializeWebSocket() {
         });
     
         // Handle get encounters request
-        module.socketManager.onMessageType("get-encounters", async (data) => {
+        socketManager.onMessageType("get-encounters", async (data) => {
             ModuleLogger.info(`Received request for encounters`);
             
             try {
@@ -1229,14 +1244,14 @@ export function initializeWebSocket() {
                 };
             }) || [];
     
-            module.socketManager.send({
+            socketManager.send({
                 type: "encounters-list",
                 requestId: data.requestId,
                 encounters
             });
             } catch (error) {
             ModuleLogger.error(`Error getting encounters list:`, error);
-            module.socketManager.send({
+            socketManager.send({
                 type: "encounters-list",
                 requestId: data.requestId,
                 error: (error as Error).message,
@@ -1246,7 +1261,7 @@ export function initializeWebSocket() {
         });
     
         // Handle start encounter request
-        module.socketManager.onMessageType("start-encounter", async (data) => {
+        socketManager.onMessageType("start-encounter", async (data) => {
             ModuleLogger.info(`Received request to start encounter with options:`, data);
             
             try {
@@ -1336,7 +1351,7 @@ export function initializeWebSocket() {
                 // Activate this combat
                 await combat.activate();
                 
-                module.socketManager.send({
+                socketManager.send({
                 type: "encounter-started",
                 requestId: data.requestId,
                 encounterId: combat.id,
@@ -1362,7 +1377,7 @@ export function initializeWebSocket() {
             }
             } catch (error) {
             ModuleLogger.error(`Error starting encounter:`, error);
-            module.socketManager.send({
+            socketManager.send({
                 type: "encounter-started",
                 requestId: data.requestId,
                 error: (error as Error).message
@@ -1371,7 +1386,7 @@ export function initializeWebSocket() {
         });
     
         // Handle next turn request
-        module.socketManager.onMessageType("encounter-next-turn", async (data) => {
+        socketManager.onMessageType("encounter-next-turn", async (data) => {
             ModuleLogger.info(`Received request for next turn in encounter: ${data.encounterId || 'active'}`);
             
             try {
@@ -1385,7 +1400,7 @@ export function initializeWebSocket() {
             
             await combat.nextTurn();
             
-            module.socketManager.send({
+            socketManager.send({
                 type: "encounter-navigation",
                 requestId: data.requestId,
                 encounterId: combat.id,
@@ -1403,7 +1418,7 @@ export function initializeWebSocket() {
             });
             } catch (error) {
             ModuleLogger.error(`Error advancing to next turn:`, error);
-            module.socketManager.send({
+            socketManager.send({
                 type: "encounter-navigation",
                 requestId: data.requestId,
                 error: (error as Error).message
@@ -1412,7 +1427,7 @@ export function initializeWebSocket() {
         });
     
         // Handle next round request
-        module.socketManager.onMessageType("encounter-next-round", async (data) => {
+        socketManager.onMessageType("encounter-next-round", async (data) => {
             ModuleLogger.info(`Received request for next round in encounter: ${data.encounterId || 'active'}`);
             
             try {
@@ -1426,7 +1441,7 @@ export function initializeWebSocket() {
             
             await combat.nextRound();
             
-            module.socketManager.send({
+            socketManager.send({
                 type: "encounter-navigation",
                 requestId: data.requestId,
                 encounterId: combat.id,
@@ -1444,7 +1459,7 @@ export function initializeWebSocket() {
             });
             } catch (error) {
             ModuleLogger.error(`Error advancing to next round:`, error);
-            module.socketManager.send({
+            socketManager.send({
                 type: "encounter-navigation",
                 requestId: data.requestId,
                 error: (error as Error).message
@@ -1453,7 +1468,7 @@ export function initializeWebSocket() {
         });
     
         // Handle previous turn request
-        module.socketManager.onMessageType("encounter-previous-turn", async (data) => {
+        socketManager.onMessageType("encounter-previous-turn", async (data) => {
             ModuleLogger.info(`Received request for previous turn in encounter: ${data.encounterId || 'active'}`);
             
             try {
@@ -1467,7 +1482,7 @@ export function initializeWebSocket() {
             
             await combat.previousTurn();
             
-            module.socketManager.send({
+            socketManager.send({
                 type: "encounter-navigation",
                 requestId: data.requestId,
                 encounterId: combat.id,
@@ -1485,7 +1500,7 @@ export function initializeWebSocket() {
             });
             } catch (error) {
             ModuleLogger.error(`Error going back to previous turn:`, error);
-            module.socketManager.send({
+            socketManager.send({
                 type: "encounter-navigation",
                 requestId: data.requestId,
                 error: (error as Error).message
@@ -1494,7 +1509,7 @@ export function initializeWebSocket() {
         });
     
         // Handle previous round request
-        module.socketManager.onMessageType("encounter-previous-round", async (data) => {
+        socketManager.onMessageType("encounter-previous-round", async (data) => {
             ModuleLogger.info(`Received request for previous round in encounter: ${data.encounterId || 'active'}`);
             
             try {
@@ -1508,7 +1523,7 @@ export function initializeWebSocket() {
             
             await combat.previousRound();
             
-            module.socketManager.send({
+            socketManager.send({
                 type: "encounter-navigation",
                 requestId: data.requestId,
                 encounterId: combat.id,
@@ -1526,7 +1541,7 @@ export function initializeWebSocket() {
             });
             } catch (error) {
             ModuleLogger.error(`Error going back to previous round:`, error);
-            module.socketManager.send({
+            socketManager.send({
                 type: "encounter-navigation",
                 requestId: data.requestId,
                 error: (error as Error).message
@@ -1535,7 +1550,7 @@ export function initializeWebSocket() {
         });
     
         // Handle end encounter request
-        module.socketManager.onMessageType("end-encounter", async (data) => {
+        socketManager.onMessageType("end-encounter", async (data) => {
             ModuleLogger.info(`Received request to end encounter: ${data.encounterId}`);
             
             try {
@@ -1552,7 +1567,7 @@ export function initializeWebSocket() {
             
             await combat.delete();
             
-            module.socketManager.send({
+            socketManager.send({
                 type: "encounter-ended",
                 requestId: data.requestId,
                 encounterId: encounterId,
@@ -1560,7 +1575,7 @@ export function initializeWebSocket() {
             });
             } catch (error) {
             ModuleLogger.error(`Error ending encounter:`, error);
-            module.socketManager.send({
+            socketManager.send({
                 type: "encounter-ended",
                 requestId: data.requestId,
                 error: (error as Error).message
@@ -1571,7 +1586,7 @@ export function initializeWebSocket() {
         // Add these handlers after the other encounter-related handlers
 
         // Handle add-to-encounter request
-        module.socketManager.onMessageType("add-to-encounter", async (data) => {
+        socketManager.onMessageType("add-to-encounter", async (data) => {
             ModuleLogger.info(`Received add-to-encounter request for encounter: ${data.encounterId}`);
             
             try {
@@ -1666,7 +1681,7 @@ export function initializeWebSocket() {
                 combat.rollAll();
             }
             
-            module.socketManager.send({
+            socketManager.send({
                 type: "add-to-encounter-result",
                 requestId: data.requestId,
                 encounterId: combat.id,
@@ -1675,7 +1690,7 @@ export function initializeWebSocket() {
             });
             } catch (error) {
             ModuleLogger.error(`Error adding to encounter:`, error);
-            module.socketManager.send({
+            socketManager.send({
                 type: "add-to-encounter-result",
                 requestId: data.requestId,
                 error: (error as Error).message
@@ -1684,7 +1699,7 @@ export function initializeWebSocket() {
         });
         
         // Handle remove-from-encounter request
-        module.socketManager.onMessageType("remove-from-encounter", async (data) => {
+        socketManager.onMessageType("remove-from-encounter", async (data) => {
             ModuleLogger.info(`Received remove-from-encounter request for encounter: ${data.encounterId}`);
             
             try {
@@ -1772,7 +1787,7 @@ export function initializeWebSocket() {
                 }
             }
             
-            module.socketManager.send({
+            socketManager.send({
                 type: "remove-from-encounter-result",
                 requestId: data.requestId,
                 encounterId: combat.id,
@@ -1781,7 +1796,7 @@ export function initializeWebSocket() {
             });
             } catch (error) {
             ModuleLogger.error(`Error removing from encounter:`, error);
-            module.socketManager.send({
+            socketManager.send({
                 type: "remove-from-encounter-result",
                 requestId: data.requestId,
                 error: (error as Error).message
@@ -1790,7 +1805,7 @@ export function initializeWebSocket() {
         });
         
         // Handle kill request (mark token/actor as defeated)
-        module.socketManager.onMessageType("kill-entity", async (data) => {
+        socketManager.onMessageType("kill-entity", async (data) => {
             ModuleLogger.info(`Received kill request for UUID: ${data.uuid}`);
             
             try {
@@ -1949,14 +1964,14 @@ export function initializeWebSocket() {
                 });
             }
 
-            module.socketManager.send({
+            socketManager.send({
                 type: "kill-entity-result",
                 requestId: data.requestId,
                 results
             });
             } catch (error) {
             ModuleLogger.error(`Error marking entities as defeated:`, error);
-            module.socketManager.send({
+            socketManager.send({
                 type: "kill-entity-result",
                 requestId: data.requestId,
                 success: false,
@@ -1966,7 +1981,7 @@ export function initializeWebSocket() {
         });
         
         // Handle decrease attribute request
-        module.socketManager.onMessageType("decrease-attribute", async (data) => {
+        socketManager.onMessageType("decrease-attribute", async (data) => {
             ModuleLogger.info(`Received decrease attribute request for attribute: ${data.attribute}, amount: ${data.amount}`);
             
             try {
@@ -2021,7 +2036,7 @@ export function initializeWebSocket() {
                 });
             }
 
-            module.socketManager.send({
+            socketManager.send({
                 type: "modify-attribute-result",
                 requestId: data.requestId,
                 results,
@@ -2029,7 +2044,7 @@ export function initializeWebSocket() {
             });
             } catch (error) {
             ModuleLogger.error(`Error decreasing attribute:`, error);
-            module.socketManager.send({
+            socketManager.send({
                 type: "modify-attribute-result",
                 requestId: data.requestId,
                 success: false,
@@ -2039,7 +2054,7 @@ export function initializeWebSocket() {
         });
         
         // Handle increase attribute request
-        module.socketManager.onMessageType("increase-attribute", async (data) => {
+        socketManager.onMessageType("increase-attribute", async (data) => {
             ModuleLogger.info(`Received increase attribute request for attribute: ${data.attribute}, amount: ${data.amount}`);
             
             try {
@@ -2094,7 +2109,7 @@ export function initializeWebSocket() {
                 });
             }
 
-            module.socketManager.send({
+            socketManager.send({
                 type: "modify-attribute-result",
                 requestId: data.requestId,
                 results,
@@ -2102,7 +2117,7 @@ export function initializeWebSocket() {
             });
             } catch (error) {
             ModuleLogger.error(`Error increasing attribute:`, error);
-            module.socketManager.send({
+            socketManager.send({
                 type: "modify-attribute-result",
                 requestId: data.requestId,
                 success: false,
@@ -2112,7 +2127,7 @@ export function initializeWebSocket() {
         });
         
         // Handle give item request
-        module.socketManager.onMessageType("give-item", async (data) => {
+        socketManager.onMessageType("give-item", async (data) => {
             ModuleLogger.info(`Received give item request from ${data.fromUuid} to ${data.toUuid}`);
             
             try {
@@ -2187,7 +2202,7 @@ export function initializeWebSocket() {
             // Create on target
             const newItem = await toEntity.createEmbeddedDocuments("Item", [itemData]);
             
-            module.socketManager.send({
+            socketManager.send({
                 type: "give-item-result",
                 requestId: data.requestId,
                 fromUuid: data.fromUuid,
@@ -2200,7 +2215,7 @@ export function initializeWebSocket() {
             });
             } catch (error) {
             ModuleLogger.error(`Error giving item:`, error);
-            module.socketManager.send({
+            socketManager.send({
                 type: "give-item-result",
                 requestId: data.requestId,
                 selected: data.selected,
@@ -2214,7 +2229,7 @@ export function initializeWebSocket() {
         }
     });
 
-    module.socketManager.onMessageType("execute-js", async (data) => {
+    socketManager.onMessageType("execute-js", async (data) => {
         ModuleLogger.info(`Received execute-js request:`, data);
     
         try {
@@ -2236,7 +2251,7 @@ export function initializeWebSocket() {
             }
     
             // Send the result back
-            module.socketManager.send({
+            socketManager.send({
                 type: "execute-js-result",
                 requestId,
                 success: true,
@@ -2244,7 +2259,7 @@ export function initializeWebSocket() {
             });
         } catch (error) {
             ModuleLogger.error(`Error in execute-js handler:`, error);
-            module.socketManager.send({
+            socketManager.send({
                 type: "execute-js-result",
                 requestId: data.requestId,
                 success: false,
@@ -2254,7 +2269,7 @@ export function initializeWebSocket() {
     });
 
     // Handle select entities request
-    module.socketManager.onMessageType("select-entities", async (data) => {
+    socketManager.onMessageType("select-entities", async (data) => {
         ModuleLogger.info(`Received select entities request:`, data);
         
         try {
@@ -2313,7 +2328,7 @@ export function initializeWebSocket() {
                 }
             }
 
-            module.socketManager.send({
+            socketManager.send({
                 type: "select-entities-result",
                 requestId: data.requestId,
                 success: true,
@@ -2322,7 +2337,7 @@ export function initializeWebSocket() {
             });
         } catch (error) {
             ModuleLogger.error(`Error selecting entities:`, error);
-            module.socketManager.send({
+            socketManager.send({
                 type: "select-entities-result",
                 requestId: data.requestId,
                 success: false,
@@ -2332,7 +2347,7 @@ export function initializeWebSocket() {
     });
 
     // Handle get selected entities request
-    module.socketManager.onMessageType("get-selected-entities", async (data) => {
+    socketManager.onMessageType("get-selected-entities", async (data) => {
         ModuleLogger.info(`Received get selected entities request:`, data);
         
         try {
@@ -2347,7 +2362,7 @@ export function initializeWebSocket() {
                 actorUuid: token.actor?.uuid || null
             }));
 
-            module.socketManager.send({
+            socketManager.send({
                 type: "selected-entities-result",
                 requestId: data.requestId,
                 success: true,
@@ -2355,7 +2370,7 @@ export function initializeWebSocket() {
             });
         } catch (error) {
             ModuleLogger.error(`Error getting selected entities:`, error);
-            module.socketManager.send({
+            socketManager.send({
                 type: "selected-entities-result",
                 requestId: data.requestId,
                 success: false,

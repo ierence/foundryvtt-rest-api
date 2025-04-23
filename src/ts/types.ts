@@ -13,12 +13,12 @@ export enum WSCloseCodes {
 
 // Module-specific interfaces
 export interface FoundryRestApi extends Game.ModuleData<any> {
-  socketManager: WebSocketManager;
+  socketManager: WebSocketManager | null;
   api: FoundryRestApiAPI;
 }
 
 export interface FoundryRestApiAPI {
-  getWebSocketManager: () => WebSocketManager;
+  getWebSocketManager: () => WebSocketManager | null;
   search: (query: string, filter?: string) => Promise<any[]>;
   getByUuid: (uuid: string) => Promise<any>;
 }

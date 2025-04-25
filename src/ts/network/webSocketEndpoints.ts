@@ -3,6 +3,7 @@ import { FoundryRestApi } from "../types";
 import { ModuleLogger } from "../utils/logger";
 import { WebSocketManager } from "./webSocketManager";
 import { parseFilterString, matchesAllFilters } from "../utils/search";
+import { deepSerializeEntity } from "../utils/serialization";
 
 export function initializeWebSocket() {
     // Get settings
@@ -151,13 +152,15 @@ export function initializeWebSocket() {
                             }
                             if (entity) {
                                 entityUUID = entity.uuid;
-                                entityData.push(entity.toObject());
+                                // Use custom deep serialization
+                                entityData.push(deepSerializeEntity(entity));
                             }
                         }
                     }
                 } else {
                     entity = await fromUuid(data.uuid);
-                    entityData = entity?.toObject ? entity.toObject() : entity;
+                    // Use custom deep serialization
+                    entityData = entity ? deepSerializeEntity(entity) : null;
                 }
                 
                 if (!entityData) {

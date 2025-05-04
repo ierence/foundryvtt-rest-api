@@ -1,5 +1,6 @@
 import { WSCloseCodes } from "../types";
 import { ModuleLogger } from "../utils/logger";
+import { moduleId } from "../constants"; // Corrected import path
 
 type MessageHandler = (data: any) => void;
 
@@ -10,7 +11,6 @@ export class WebSocketManager {
   private messageHandlers: Map<string, MessageHandler> = new Map();
   private reconnectTimer: number | null = null;
   private reconnectAttempts: number = 0;
-  private maxReconnectAttempts: number = 20;
   private clientId: string;
   private pingInterval: number | null = null;
   private isConnecting: boolean = false;
@@ -230,15 +230,24 @@ export class WebSocketManager {
     this.isConnecting = false;
     this.reconnectAttempts = 0;
     
-    // Send a ping to test connection
+    // Send an initial ping
     this.send({ type: "ping" });
     
-    // Start ping interval
+    // Start ping interval using the setting value
+    const pingIntervalSeconds = (game as Game).settings.get(moduleId, "pingInterval") as number;
+    const pingIntervalMs = pingIntervalSeconds * 1000;
+    ModuleLogger.info(`Starting application ping interval: ${pingIntervalSeconds} seconds`);
+    
+    // Clear any existing interval first
+    if (this.pingInterval !== null) {
+      window.clearInterval(this.pingInterval);
+    }
+    
     this.pingInterval = window.setInterval(() => {
       if (this.isConnected()) {
         this.send({ type: "ping" });
       }
-    }, 30000);
+    }, pingIntervalMs);
   }
 
   private onClose(event: CloseEvent): void {
@@ -252,8 +261,8 @@ export class WebSocketManager {
       this.pingInterval = null;
     }
     
-    // Don't reconnect if this was a normal closure
-    if (event.code !== WSCloseCodes.Normal) {
+    // Don't reconnect if this was a normal closure or if not primary GM
+    if (event.code !== WSCloseCodes.Normal && this.isPrimaryGM) {
       this.scheduleReconnect();
     }
   }
@@ -281,22 +290,35 @@ export class WebSocketManager {
 
   private scheduleReconnect(): void {
     if (this.reconnectTimer !== null) {
-      return;
+      return; // Already scheduled
     }
+    
+    // Read settings for reconnection parameters
+    const maxAttempts = (game as Game).settings.get(moduleId, "reconnectMaxAttempts") as number;
+    const baseDelay = (game as Game).settings.get(moduleId, "reconnectBaseDelay") as number;
     
     this.reconnectAttempts++;
     
-    if (this.reconnectAttempts > this.maxReconnectAttempts) {
-      ModuleLogger.error(`Maximum reconnection attempts reached`);
+    if (this.reconnectAttempts > maxAttempts) {
+      ModuleLogger.error(`Maximum reconnection attempts (${maxAttempts}) reached`);
+      this.reconnectAttempts = 0; // Reset for future disconnections
       return;
     }
     
-    const delay = Math.min(30000, Math.pow(2, this.reconnectAttempts) * 1000);
-    ModuleLogger.info(`Scheduling reconnect in ${delay}ms (attempt ${this.reconnectAttempts})`);
+    // Calculate delay with exponential backoff (max 30 seconds)
+    const delay = Math.min(30000, baseDelay * Math.pow(2, this.reconnectAttempts - 1));
+    ModuleLogger.info(`Scheduling reconnect in ${delay}ms (attempt ${this.reconnectAttempts}/${maxAttempts})`);
     
     this.reconnectTimer = window.setTimeout(() => {
       this.reconnectTimer = null;
-      this.connect();
+      // Only attempt reconnect if still the primary GM
+      if (this.isPrimaryGM) {
+         ModuleLogger.info(`Attempting reconnect...`);
+         this.connect();
+      } else {
+         ModuleLogger.info(`Reconnect attempt aborted - no longer primary GM.`);
+         this.reconnectAttempts = 0; // Reset attempts if not primary
+      }
     }, delay);
   }
 }

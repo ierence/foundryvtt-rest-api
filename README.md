@@ -24,3 +24,13 @@ To start using the Foundry REST API, you need to -
 - Each request must have the your API key in the "x-api-key" header.
     
 - Endpoints other than /clients require a clientId parameter that matches a connected world.
+
+### Configuration
+After installing the module, go to the module settings to configure:
+
+- **WebSocket Relay URL**: URL for the WebSocket relay server (default: `wss://foundryvtt-rest-api-relay.fly.dev/`).
+- **API Key**: Your unique API key obtained from the relay server provider (or set your own if self-hosting).
+- **Log Level**: Controls the verbosity of module logs.
+- **Ping Interval (seconds)**: How often the module sends application-level pings to the relay server to signal activity (default: `30`).
+- **Max Reconnect Attempts**: Maximum number of times the module will try to reconnect if the connection drops (default: `20`).
+- **Reconnect Base Delay (ms)**: Initial delay before the first reconnect attempt. Uses exponential backoff (default: `1000`).

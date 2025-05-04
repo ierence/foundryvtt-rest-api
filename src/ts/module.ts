@@ -57,6 +57,42 @@ Hooks.once("init", () => {
     default: 2
   });
 
+  // Add new settings for connection management
+  (game as Game).settings.register(moduleId, "pingInterval", {
+    name: "Ping Interval (seconds)",
+    hint: "How often (in seconds) the module sends a ping to the relay server to keep the connection alive.",
+    scope: "world",
+    config: true,
+    type: Number,
+    default: 30,
+    range: {
+      min: 5,
+      max: 600,
+      step: 1
+    },
+    requiresReload: true
+  } as any);
+
+  (game as Game).settings.register(moduleId, "reconnectMaxAttempts", {
+    name: "Max Reconnect Attempts",
+    hint: "Maximum number of times the module will try to reconnect after losing connection.",
+    scope: "world",
+    config: true,
+    type: Number,
+    default: 20,
+    requiresReload: true
+  } as any);
+
+  (game as Game).settings.register(moduleId, "reconnectBaseDelay", {
+    name: "Reconnect Base Delay (ms)",
+    hint: "Initial delay (in milliseconds) before the first reconnect attempt. Subsequent attempts use exponential backoff.",
+    scope: "world",
+    config: true,
+    type: Number,
+    default: 1000,
+    requiresReload: true
+  } as any);
+
   // Create and expose module API
   const module = (game as Game).modules.get(moduleId) as FoundryRestApi;
   module.api = {

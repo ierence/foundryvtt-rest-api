@@ -1,7 +1,8 @@
 {
-  "name": "foundry-module-ts",
-  "version": "1.0.0",
-  "description": "A template project for FoundryVTT modules using Typescript",
+  "name": "foundry-rest-api",
+  "version": "1.8.1",
+  "description": "A REST API for Foundry VTT",
+  "author": "ThreeHats",
   "license": "MIT",
   "private": true,
   "scripts": {

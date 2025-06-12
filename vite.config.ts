@@ -1,3 +1,5 @@
+import dotenv from 'dotenv';
+dotenv.config();
 import * as fsPromises from "fs/promises";
 import copy from "rollup-plugin-copy";
 import scss from "rollup-plugin-scss";

@@ -39,10 +39,11 @@ export function initializeWebSocket() {
         // Register message handlers using routers
         const socketManager = module.socketManager;
         routers.forEach((router: Router) => {
-            router.reflect(socketManager);
+            router.reflect(socketManager);  
+            ModuleLogger.debug(`Registered ${router.title}`);
         });
-        
-        ModuleLogger.info(`Registered ${routers.length} routers with WebSocket manager`);
+
+        ModuleLogger.warn(`Registered ${routers.length} routers with WebSocket manager`);
         
     } catch (error) {
       ModuleLogger.error(`Error initializing WebSocket:`, error);

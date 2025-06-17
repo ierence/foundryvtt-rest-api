@@ -1,4 +1,4 @@
-import {Router, HandlerContext} from "./baseRouter"
+import { Router} from "./baseRouter"
 import { ModuleLogger } from "../../utils/logger"
 
 export const router = new Router(
@@ -8,9 +8,10 @@ export const router = new Router(
 router.addRoute(
     {
         actionType: "ping",
-        handler: (context: HandlerContext) => {
-            ModuleLogger.info(`Received ping, sending pong`);
-            context.socketManager.send({ type: "pong" });
+        handler: async (_data, context) => {
+            const socketManager = context?.socketManager;
+            ModuleLogger.info(`Received ping, sending pong`)
+            socketManager?.send({ type: "pong" });
         }
     }
 )
@@ -18,7 +19,7 @@ router.addRoute(
 router.addRoute(
     {
         actionType: "pong",
-        handler: () => {
+        handler: async (_data, _context) => {
             ModuleLogger.info(`Received pong`);
         }
     }
